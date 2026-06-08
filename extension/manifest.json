@@ -5,7 +5,7 @@
   "description": "Streams synchronized German TTS audio for YouTube captions through a secure WebSocket backend.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],
-  "host_permissions": ["*://*.youtube.com/*", "*://youtube.com/*"],
+  "host_permissions": ["https://*.youtube.com/*", "https://youtube.com/*"],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -32,13 +32,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://youtube.com/*", "*://*.youtube.com/*"],
+      "matches": ["https://youtube.com/*", "https://*.youtube.com/*"],
       "js": ["dist/page-probe.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
-      "matches": ["*://youtube.com/*", "*://*.youtube.com/*"],
+      "matches": ["https://youtube.com/*", "https://*.youtube.com/*"],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
     }

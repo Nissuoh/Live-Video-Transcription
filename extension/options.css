@@ -68,9 +68,29 @@ input {
   font: inherit;
 }
 
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: #1d6fd6;
+}
+
 input:focus {
   border-color: #1d6fd6;
   outline: 3px solid rgba(29, 111, 214, 0.18);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-weight: 600;
+}
+
+.notice {
+  margin-top: 2px;
+  color: #59667a;
 }
 
 .actions {

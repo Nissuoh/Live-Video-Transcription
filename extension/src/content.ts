@@ -20,6 +20,13 @@
     suggestedPlaybackRate: number;
   }
 
+  interface RunStateResponse {
+    ok: boolean;
+    enabled?: boolean;
+    configured?: boolean;
+    error?: string;
+  }
+
   interface YouTubePlayerResponse {
     videoDetails?: {
       videoId?: string;
@@ -216,6 +223,8 @@
     private activeVideoId: string | null = null;
     private port: chrome.runtime.Port | null = null;
     private scheduler: AudioChunkScheduler | null = null;
+    private currentVideo: HTMLVideoElement | null = null;
+    private previousMuted: boolean | null = null;
     private navigationTimer: number | null = null;
 
     start(): void {
@@ -223,6 +232,11 @@
       window.addEventListener("yt-navigate-finish", this.queueBootstrap);
       window.addEventListener("pageshow", this.queueBootstrap);
       window.addEventListener("popstate", this.queueBootstrap);
+      chrome.runtime.onMessage.addListener((message: unknown) => {
+        if (isRecord(message) && message.type === "lvtSettingsUpdated") {
+          this.queueBootstrap();
+        }
+      });
     }
 
     private readonly queueBootstrap = (): void => {
@@ -238,32 +252,48 @@
     };
 
     private async bootstrap(): Promise<void> {
+      const runState = await getRunState();
+      if (!runState.enabled) {
+        this.teardown();
+        hideStatus();
+        return;
+      }
+      if (!runState.configured) {
+        this.teardown();
+        showStatus("Live translation is enabled but not configured. Open the extension popup.", "error");
+        return;
+      }
+
       const video = await waitForVideo();
       const playerResponse = await extractPlayerResponse();
       if (playerResponse === null) {
         this.teardown();
-        throw new Error("ytInitialPlayerResponse was not found");
+        showStatus("Could not read the current YouTube video metadata.", "error");
+        return;
       }
       const videoId = resolveVideoId(playerResponse);
       if (videoId === null) {
         this.teardown();
-        throw new Error("YouTube video id was not found");
+        showStatus("Could not identify the current YouTube video.", "error");
+        return;
       }
       if (this.activeVideoId === videoId) {
         return;
       }
       this.teardown();
       this.activeVideoId = videoId;
+      this.currentVideo = video;
 
       const track = chooseCaptionTrack(playerResponse);
       if (track === null) {
-        throw new Error("No YouTube caption track is available for this video");
+        showStatus("No caption track is available for this video.", "error");
+        return;
       }
       const transcript = await fetchTranscript(track);
       if (transcript.length === 0) {
-        throw new Error("Caption track did not contain transcript items");
+        showStatus("The selected caption track is empty.", "error");
+        return;
       }
-      video.muted = true;
       this.scheduler = new AudioChunkScheduler(video);
       this.openStream(videoId, transcript);
     }
@@ -293,12 +323,21 @@
       }
       if (message.type === "streamError") {
         const error = typeof message.error === "string" ? message.error : "Stream error";
-        throw new Error(error);
+        this.restoreMutedState();
+        showStatus(error, "error");
+        return;
       }
       if (message.type === "streamClosed") {
         if (message.code !== 1000) {
+          this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
+          showStatus("Live translation connection closed unexpectedly.", "error");
         }
+        return;
+      }
+      if (message.type === "streamOpen") {
+        this.muteCurrentVideo();
+        showStatus("Live translation is preparing audio.", "info");
         return;
       }
       if (message.type !== "streamChunk") {
@@ -310,6 +349,7 @@
       }
       const chunk = parseStreamChunk(message.chunk);
       await scheduler.addChunk(chunk);
+      hideStatus();
     }
 
     private teardown(): void {
@@ -323,7 +363,88 @@
         this.scheduler.dispose();
         this.scheduler = null;
       }
+      this.restoreMutedState();
+      this.currentVideo = null;
     }
+
+    private muteCurrentVideo(): void {
+      if (this.currentVideo === null) {
+        return;
+      }
+      if (this.previousMuted === null) {
+        this.previousMuted = this.currentVideo.muted;
+      }
+      this.currentVideo.muted = true;
+    }
+
+    private restoreMutedState(): void {
+      if (this.currentVideo !== null && this.previousMuted !== null) {
+        this.currentVideo.muted = this.previousMuted;
+      }
+      this.previousMuted = null;
+    }
+  }
+
+  async function getRunState(): Promise<Required<Pick<RunStateResponse, "enabled" | "configured">>> {
+    try {
+      const response = (await chrome.runtime.sendMessage({ type: "getRunState" })) as RunStateResponse;
+      if (!response.ok) {
+        return { enabled: false, configured: false };
+      }
+      return {
+        enabled: response.enabled === true,
+        configured: response.configured === true,
+      };
+    } catch {
+      return { enabled: false, configured: false };
+    }
+  }
+
+  function showStatus(message: string, kind: "info" | "error"): void {
+    let host = document.getElementById("lvt-status-host");
+    if (host === null) {
+      host = document.createElement("div");
+      host.id = "lvt-status-host";
+      const shadow = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `
+        :host {
+          position: fixed;
+          right: 16px;
+          bottom: 16px;
+          z-index: 2147483647;
+          pointer-events: none;
+        }
+        .status {
+          max-width: min(360px, calc(100vw - 32px));
+          border: 1px solid #b8c1d1;
+          border-radius: 6px;
+          padding: 10px 12px;
+          background: #ffffff;
+          color: #172033;
+          box-shadow: 0 10px 30px rgba(15, 23, 42, 0.2);
+          font: 13px/1.4 Arial, sans-serif;
+        }
+        .status[data-kind="error"] {
+          border-color: #f0b8b3;
+          color: #8f1d17;
+        }
+      `;
+      const status = document.createElement("div");
+      status.className = "status";
+      status.id = "status";
+      shadow.append(style, status);
+      document.documentElement.append(host);
+    }
+    const shadowStatus = host.shadowRoot?.getElementById("status");
+    if (shadowStatus instanceof HTMLElement) {
+      shadowStatus.dataset.kind = kind;
+      shadowStatus.textContent = message;
+    }
+  }
+
+  function hideStatus(): void {
+    document.getElementById("lvt-status-host")?.remove();
   }
 
   async function extractPlayerResponse(): Promise<YouTubePlayerResponse | null> {

@@ -2,13 +2,15 @@
   interface ExtensionConfig {
     authToken?: string;
     backendWssUrl?: string;
+    autoTranslate?: boolean;
   }
 
-  const CONFIG_KEYS = ["authToken", "backendWssUrl"] as const;
+  const CONFIG_KEYS = ["authToken", "backendWssUrl", "autoTranslate"] as const;
 
   const form = requireElement("#options-form", HTMLFormElement);
   const backendInput = requireElement("#backend-wss-url", HTMLInputElement);
   const tokenInput = requireElement("#auth-token", HTMLInputElement);
+  const autoTranslateInput = requireElement("#auto-translate", HTMLInputElement);
   const revealButton = requireElement("#reveal-token", HTMLButtonElement);
   const status = requireElement("#status", HTMLParagraphElement);
 
@@ -33,6 +35,7 @@
     const config = (await storage.get([...CONFIG_KEYS])) as ExtensionConfig;
     backendInput.value = typeof config.backendWssUrl === "string" ? config.backendWssUrl : "";
     tokenInput.value = typeof config.authToken === "string" ? config.authToken : "";
+    autoTranslateInput.checked = config.autoTranslate === true;
   }
 
   async function saveOptions(): Promise<void> {
@@ -43,12 +46,16 @@
     }
     const backendWssUrl = backendInput.value.trim();
     const authToken = tokenInput.value.trim();
+    const autoTranslate = autoTranslateInput.checked;
     try {
-      assertWssUrl(backendWssUrl);
-      if (authToken.length === 0) {
-        throw new Error("Auth token is required.");
+      if (backendWssUrl.length > 0 || autoTranslate) {
+        assertWssUrl(backendWssUrl);
       }
-      await storage.set({ backendWssUrl, authToken });
+      if (autoTranslate && authToken.length === 0) {
+        throw new Error("Auth token is required when automatic translation is enabled.");
+      }
+      await storage.set({ backendWssUrl, authToken, autoTranslate });
+      await notifyActiveYouTubeTab();
       setStatus("Saved.", "ok");
     } catch (error: unknown) {
       setStatus(error instanceof Error ? error.message : "Settings are invalid.", "error");
@@ -79,6 +86,18 @@
       return null;
     }
     return chrome.storage.local;
+  }
+
+  async function notifyActiveYouTubeTab(): Promise<void> {
+    if (chrome.tabs?.query === undefined || chrome.tabs.sendMessage === undefined) {
+      return;
+    }
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    await Promise.allSettled(
+      tabs
+        .filter((tab) => typeof tab.id === "number")
+        .map((tab) => chrome.tabs.sendMessage(tab.id as number, { type: "lvtSettingsUpdated" })),
+    );
   }
 
   function requireElement<T extends Element>(

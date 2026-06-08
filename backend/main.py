@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import logging
 import asyncio
+import hashlib
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -14,6 +15,7 @@ from .auth import AuthTokenValidator, OriginMatcher
 from .config import Settings, get_settings
 from .pipeline import TranslationPipeline
 from .providers import build_translation_provider, build_tts_provider
+from .rate_limit import FixedWindowRateLimiter
 from .schemas import HealthResponse, StreamChunk, StreamRequest
 
 logger = logging.getLogger("live_video_translation")
@@ -53,6 +55,11 @@ def _validate_request_limits(request: StreamRequest, settings: Settings) -> None
         )
 
 
+def _rate_limit_key(prefix: str, token: str) -> str:
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"{prefix}:{digest}"
+
+
 async def _drain_keepalive_messages(websocket: WebSocket) -> None:
     while True:
         await websocket.receive_text()
@@ -74,6 +81,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.auth_validator = auth_validator
     app.state.origin_matcher = origin_matcher
+    app.state.rate_limiter = FixedWindowRateLimiter()
     app.state.http_client = http_client
     app.state.pipeline = TranslationPipeline(
         translator=translator,
@@ -112,6 +120,7 @@ def create_app() -> FastAPI:
         settings: Settings = app.state.settings
         origin_matcher: OriginMatcher = app.state.origin_matcher
         auth_validator: AuthTokenValidator = app.state.auth_validator
+        rate_limiter: FixedWindowRateLimiter = app.state.rate_limiter
         pipeline: TranslationPipeline = app.state.pipeline
 
         if settings.require_wss and not _is_secure_websocket(websocket):
@@ -131,6 +140,19 @@ def create_app() -> FastAPI:
             _validate_request_limits(request, settings)
             if not auth_validator.is_valid(request.token):
                 await websocket.close(code=1008, reason="Invalid auth token")
+                return
+            if not rate_limiter.allow(
+                _rate_limit_key("connections", request.token),
+                limit=settings.rate_limit_connections_per_minute,
+            ):
+                await websocket.close(code=1013, reason="Connection rate limit exceeded")
+                return
+            if not rate_limiter.allow(
+                _rate_limit_key("chunks", request.token),
+                limit=settings.rate_limit_chunks_per_minute,
+                cost=len(request.transcript),
+            ):
+                await websocket.close(code=1013, reason="Chunk rate limit exceeded")
                 return
 
             keepalive_drain_task = asyncio.create_task(_drain_keepalive_messages(websocket))

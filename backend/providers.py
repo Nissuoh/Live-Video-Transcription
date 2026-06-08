@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import asyncio
 from typing import Any
 
 import httpx
@@ -63,6 +64,30 @@ async def _raise_for_provider_error(provider: str, response: httpx.Response) -> 
     )
 
 
+async def _post_with_retries(
+    provider: str,
+    client: httpx.AsyncClient,
+    settings: Settings,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    retry_statuses = {429, 500, 502, 503, 504}
+    last_error: Exception | None = None
+    for attempt in range(settings.provider_max_retries + 1):
+        try:
+            response = await client.post(url, **kwargs)
+            if response.status_code not in retry_statuses or attempt >= settings.provider_max_retries:
+                return response
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+            if attempt >= settings.provider_max_retries:
+                raise ProviderRequestError(f"{provider} request failed: {exc}") from exc
+        await asyncio.sleep(settings.provider_retry_base_delay_seconds * (2**attempt))
+    if last_error is not None:
+        raise ProviderRequestError(f"{provider} request failed: {last_error}") from last_error
+    raise ProviderRequestError(f"{provider} request failed after retries")
+
+
 def _extract_openai_response_text(payload: dict[str, Any]) -> str:
     output_text = payload.get("output_text")
     if isinstance(output_text, str) and output_text.strip():
@@ -97,11 +122,14 @@ class OpenAITranslator(TranslationProvider):
         target_language: str = "de",
     ) -> str:
         prompt = (
-            "Übersetze ins Deutsche. "
+            "\u00dcbersetze ins Deutsche. "
             f"Komprimiere semantisch, sodass die Sprechdauer {duration_seconds:.2f} Sekunden "
-            "nicht überschreitet. Nur nackter Output."
+            "nicht \u00fcberschreitet. Nur nackter Output."
         )
-        response = await self._client.post(
+        response = await _post_with_retries(
+            "OpenAI translation",
+            self._client,
+            self._settings,
             f"{self._settings.openai_base_url}/responses",
             headers={"Authorization": f"Bearer {self._api_key}"},
             json={
@@ -140,7 +168,10 @@ class DeepLTranslator(TranslationProvider):
         duration_seconds: float,
         target_language: str = "de",
     ) -> str:
-        response = await self._client.post(
+        response = await _post_with_retries(
+            "DeepL translation",
+            self._client,
+            self._settings,
             f"{self._settings.deepl_api_base}/v2/translate",
             headers={
                 "Authorization": f"DeepL-Auth-Key {self._api_key}",
@@ -197,7 +228,10 @@ class OpenAITTS(TTSProvider):
         if self._settings.openai_tts_instructions.strip():
             body["instructions"] = self._settings.openai_tts_instructions.strip()
 
-        response = await self._client.post(
+        response = await _post_with_retries(
+            "OpenAI TTS",
+            self._client,
+            self._settings,
             f"{self._settings.openai_base_url}/audio/speech",
             headers={"Authorization": f"Bearer {self._api_key}"},
             json=body,
@@ -227,7 +261,10 @@ class ElevenLabsTTS(TTSProvider):
     ) -> TTSResult:
         voice_id = self._settings.elevenlabs_voice_id
         assert voice_id is not None
-        response = await self._client.post(
+        response = await _post_with_retries(
+            "ElevenLabs TTS",
+            self._client,
+            self._settings,
             f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
             params={"output_format": self._settings.elevenlabs_output_format},
             headers={

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     max_transcript_items: int = Field(default=2000, ge=1, le=20000)
     max_text_chars_per_chunk: int = Field(default=4000, ge=1, le=20000)
     provider_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
+    provider_max_retries: int = Field(default=2, ge=0, le=5)
+    provider_retry_base_delay_seconds: float = Field(default=0.4, gt=0, le=10)
+    rate_limit_connections_per_minute: int = Field(default=30, ge=1, le=10000)
+    rate_limit_chunks_per_minute: int = Field(default=3000, ge=1, le=100000)
 
     openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.openai.com/v1"
@@ -37,7 +41,7 @@ class Settings(BaseSettings):
     openai_tts_voice: str = "coral"
     openai_tts_response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     openai_tts_instructions: str = (
-        "Sprich klares, natürliches Deutsch mit ruhiger Synchronisationsgeschwindigkeit."
+        "Sprich klares, natuerliches Deutsch mit ruhiger Synchronisationsgeschwindigkeit."
     )
     openai_max_output_tokens: int = Field(default=220, ge=16, le=2000)
     openai_temperature: float = Field(default=0.2, ge=0, le=2)

@@ -12,7 +12,7 @@
         <img src="icons/icon48.png" alt="" width="40" height="40" />
         <div>
           <h1>Live Video Translation</h1>
-          <p>YouTube video and captions are detected automatically.</p>
+          <p>YouTube video and captions are detected automatically when enabled.</p>
         </div>
       </header>
 
@@ -36,6 +36,13 @@
           autocomplete="off"
           required
         />
+
+        <label class="checkbox-row" for="auto-translate">
+          <input id="auto-translate" name="autoTranslate" type="checkbox" />
+          <span>Enable automatic translation on YouTube</span>
+        </label>
+
+        <p class="notice">Translated speech is AI-generated and sent through your configured backend.</p>
 
         <div class="actions">
           <button type="submit">Save</button>

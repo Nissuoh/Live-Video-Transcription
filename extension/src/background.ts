@@ -37,6 +37,7 @@
   interface ExtensionConfig {
     authToken?: string;
     backendWssUrl?: string;
+    autoTranslate?: boolean;
   }
 
   interface StreamSession {
@@ -45,7 +46,7 @@
     port: chrome.runtime.Port;
   }
 
-  const CONFIG_KEYS = ["authToken", "backendWssUrl"] as const;
+  const CONFIG_KEYS = ["authToken", "backendWssUrl", "autoTranslate"] as const;
   const STREAM_PORT_NAME = "translation-stream";
   const KEEPALIVE_INTERVAL_MS = 20_000;
   const MAX_TRANSCRIPT_ITEMS = 2000;
@@ -64,9 +65,24 @@
     if (typeof existing.backendWssUrl !== "string") {
       defaults.backendWssUrl = "";
     }
+    if (typeof existing.autoTranslate !== "boolean") {
+      defaults.autoTranslate = false;
+    }
     if (Object.keys(defaults).length > 0) {
       await chrome.storage.local.set(defaults);
     }
+  });
+
+  chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+    void handleRuntimeMessage(message, sender)
+      .then((response) => sendResponse(response))
+      .catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Unknown runtime error",
+        });
+      });
+    return true;
   });
 
   chrome.runtime.onConnect.addListener((port) => {
@@ -95,6 +111,28 @@
       return;
     }
     await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+  }
+
+  async function handleRuntimeMessage(
+    message: unknown,
+    sender: chrome.runtime.MessageSender,
+  ): Promise<unknown> {
+    if (!isRecord(message) || message.type !== "getRunState") {
+      return { ok: false, error: "Unsupported message" };
+    }
+    if (!isTrustedYouTubeSender(sender)) {
+      return { ok: false, error: "Untrusted sender" };
+    }
+    const config = (await chrome.storage.local.get([...CONFIG_KEYS])) as ExtensionConfig;
+    const enabled = config.autoTranslate === true;
+    const authToken = typeof config.authToken === "string" ? config.authToken.trim() : "";
+    const backendWssUrl =
+      typeof config.backendWssUrl === "string" ? config.backendWssUrl.trim() : "";
+    return {
+      ok: true,
+      enabled,
+      configured: enabled && authToken.length > 0 && isValidWssStreamUrl(backendWssUrl),
+    };
   }
 
   async function handlePortMessage(
@@ -205,11 +243,14 @@
     const authToken = typeof stored.authToken === "string" ? stored.authToken.trim() : "";
     const backendWssUrl =
       typeof stored.backendWssUrl === "string" ? stored.backendWssUrl.trim() : "";
+    if (stored.autoTranslate !== true) {
+      throw new Error("Automatic translation is disabled.");
+    }
     if (authToken.length === 0) {
       throw new Error("Missing auth token. Open the extension options and save a token.");
     }
     assertWssUrl(backendWssUrl);
-    return { authToken, backendWssUrl };
+    return { authToken, backendWssUrl, autoTranslate: true };
   }
 
   function parseStartMessage(value: Record<string, unknown>): StartStreamMessage {
@@ -283,12 +324,17 @@
   }
 
   function assertWssUrl(value: string): void {
-    const url = new URL(value);
-    if (url.protocol !== "wss:") {
-      throw new Error("Backend URL must use wss://");
+    if (!isValidWssStreamUrl(value)) {
+      throw new Error("Backend URL must use wss:// and point to /stream");
     }
-    if (!url.pathname.endsWith("/stream")) {
-      throw new Error("Backend URL must point to /stream");
+  }
+
+  function isValidWssStreamUrl(value: string): boolean {
+    try {
+      const url = new URL(value);
+      return url.protocol === "wss:" && url.pathname.endsWith("/stream");
+    } catch {
+      return false;
     }
   }
 
