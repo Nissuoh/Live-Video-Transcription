@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Live Video Translation",
+  "version": "1.0.0",
+  "description": "Streams synchronized German TTS audio for YouTube captions through a secure WebSocket backend.",
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://youtube.com/*", "*://*.youtube.com/*"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'none';"
+  }
+}
