@@ -3,8 +3,29 @@
   "name": "Live Video Translation",
   "version": "1.0.0",
   "description": "Streams synchronized German TTS audio for YouTube captions through a secure WebSocket backend.",
+  "minimum_chrome_version": "116",
   "permissions": ["storage"],
-  "host_permissions": ["*://*.youtube.com/*"],
+  "host_permissions": ["*://*.youtube.com/*", "*://youtube.com/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Live Video Translation",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
   "background": {
     "service_worker": "dist/background.js",
     "type": "module"
@@ -12,11 +33,17 @@
   "content_scripts": [
     {
       "matches": ["*://youtube.com/*", "*://*.youtube.com/*"],
+      "js": ["dist/page-probe.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://youtube.com/*", "*://*.youtube.com/*"],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'none';"
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; connect-src 'self' wss://*; style-src 'self'; img-src 'self';"
   }
 }

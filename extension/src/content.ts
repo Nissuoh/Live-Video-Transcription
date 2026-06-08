@@ -10,7 +10,6 @@
   interface StreamRequest {
     videoId: string;
     platform: Platform;
-    token: string;
     transcript: TranscriptItem[];
   }
 
@@ -19,11 +18,6 @@
     end: number;
     audioBase64: string;
     suggestedPlaybackRate: number;
-  }
-
-  interface ExtensionSettings {
-    authToken: string;
-    backendWssUrl: string;
   }
 
   interface YouTubePlayerResponse {
@@ -68,7 +62,7 @@
   const SCHEDULE_AHEAD_SECONDS = 0.2;
   const LATE_TOLERANCE_SECONDS = 0.35;
   const STALE_CHUNK_SECONDS = 30;
-  const CONFIG_KEYS = ["authToken", "backendWssUrl"] as const;
+  const STREAM_PORT_NAME = "translation-stream";
 
   class AudioChunkScheduler {
     private readonly video: HTMLVideoElement;
@@ -220,7 +214,7 @@
 
   class YouTubeTranslationController {
     private activeVideoId: string | null = null;
-    private socket: WebSocket | null = null;
+    private port: chrome.runtime.Port | null = null;
     private scheduler: AudioChunkScheduler | null = null;
     private navigationTimer: number | null = null;
 
@@ -245,12 +239,14 @@
 
     private async bootstrap(): Promise<void> {
       const video = await waitForVideo();
-      const playerResponse = extractInitialPlayerResponse();
+      const playerResponse = await extractPlayerResponse();
       if (playerResponse === null) {
+        this.teardown();
         throw new Error("ytInitialPlayerResponse was not found");
       }
       const videoId = resolveVideoId(playerResponse);
       if (videoId === null) {
+        this.teardown();
         throw new Error("YouTube video id was not found");
       }
       if (this.activeVideoId === videoId) {
@@ -267,63 +263,61 @@
       if (transcript.length === 0) {
         throw new Error("Caption track did not contain transcript items");
       }
-      const settings = await loadSettings();
       video.muted = true;
       this.scheduler = new AudioChunkScheduler(video);
-      this.openStream(settings, videoId, transcript);
+      this.openStream(videoId, transcript);
     }
 
-    private openStream(
-      settings: ExtensionSettings,
-      videoId: string,
-      transcript: TranscriptItem[],
-    ): void {
-      const socket = new WebSocket(settings.backendWssUrl);
-      this.socket = socket;
-      socket.addEventListener("open", () => {
-        const request: StreamRequest = {
-          videoId,
-          platform: "youtube",
-          token: settings.authToken,
-          transcript,
-        };
-        socket.send(JSON.stringify(request));
-      });
-      socket.addEventListener("message", (event) => {
-        void this.handleStreamMessage(event.data).catch((error: unknown) => {
+    private openStream(videoId: string, transcript: TranscriptItem[]): void {
+      const port = chrome.runtime.connect({ name: STREAM_PORT_NAME });
+      this.port = port;
+      port.onMessage.addListener((message: unknown) => {
+        void this.handleWorkerMessage(message).catch((error: unknown) => {
           console.error("[Live Video Translation]", error);
         });
       });
-      socket.addEventListener("close", (event) => {
-        if (event.code !== 1000) {
-          console.error(
-            "[Live Video Translation] WebSocket closed",
-            event.code,
-            event.reason,
-          );
-        }
+      port.onDisconnect.addListener(() => {
+        this.port = null;
       });
-      socket.addEventListener("error", () => {
-        console.error("[Live Video Translation] WebSocket error");
-      });
+      const request: StreamRequest = {
+        videoId,
+        platform: "youtube",
+        transcript,
+      };
+      port.postMessage({ type: "startStream", ...request });
     }
 
-    private async handleStreamMessage(data: unknown): Promise<void> {
+    private async handleWorkerMessage(message: unknown): Promise<void> {
+      if (!isRecord(message) || typeof message.type !== "string") {
+        throw new Error("Invalid background message");
+      }
+      if (message.type === "streamError") {
+        const error = typeof message.error === "string" ? message.error : "Stream error";
+        throw new Error(error);
+      }
+      if (message.type === "streamClosed") {
+        if (message.code !== 1000) {
+          console.error("[Live Video Translation] WebSocket closed", message);
+        }
+        return;
+      }
+      if (message.type !== "streamChunk") {
+        return;
+      }
       const scheduler = this.scheduler;
       if (scheduler === null) {
         return;
       }
-      if (typeof data !== "string") {
-        throw new Error("WebSocket message was not text JSON");
-      }
-      const chunk = parseStreamChunk(JSON.parse(data));
+      const chunk = parseStreamChunk(message.chunk);
       await scheduler.addChunk(chunk);
     }
 
     private teardown(): void {
-      if (this.socket !== null) {
-        this.socket.close(1000, "Navigated away");
-        this.socket = null;
+      this.activeVideoId = null;
+      if (this.port !== null) {
+        this.port.postMessage({ type: "stopStream" });
+        this.port.disconnect();
+        this.port = null;
       }
       if (this.scheduler !== null) {
         this.scheduler.dispose();
@@ -332,7 +326,48 @@
     }
   }
 
-  function extractInitialPlayerResponse(): YouTubePlayerResponse | null {
+  async function extractPlayerResponse(): Promise<YouTubePlayerResponse | null> {
+    const fromPage = await requestPlayerResponseFromPage();
+    return fromPage ?? extractInitialPlayerResponseFromScripts();
+  }
+
+  function requestPlayerResponseFromPage(): Promise<YouTubePlayerResponse | null> {
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timeoutId = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        resolve(null);
+      }, 1000);
+
+      const onMessage = (event: MessageEvent<unknown>): void => {
+        if (event.source !== window || !isRecord(event.data)) {
+          return;
+        }
+        if (
+          event.data.source !== "lvt-page-probe" ||
+          event.data.type !== "playerResponse" ||
+          event.data.requestId !== requestId
+        ) {
+          return;
+        }
+        window.clearTimeout(timeoutId);
+        window.removeEventListener("message", onMessage);
+        resolve(parsePlayerResponse(event.data.playerResponse));
+      };
+
+      window.addEventListener("message", onMessage);
+      window.postMessage(
+        {
+          source: "lvt-content",
+          type: "readPlayerResponse",
+          requestId,
+        },
+        window.location.origin,
+      );
+    });
+  }
+
+  function extractInitialPlayerResponseFromScripts(): YouTubePlayerResponse | null {
     for (const script of Array.from(document.scripts)) {
       const source = script.textContent ?? "";
       if (!source.includes("ytInitialPlayerResponse")) {
@@ -343,12 +378,19 @@
         continue;
       }
       try {
-        return JSON.parse(json) as YouTubePlayerResponse;
+        return parsePlayerResponse(JSON.parse(json));
       } catch {
         continue;
       }
     }
     return null;
+  }
+
+  function parsePlayerResponse(value: unknown): YouTubePlayerResponse | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+    return value as YouTubePlayerResponse;
   }
 
   function extractBalancedJson(source: string, marker: string): string | null {
@@ -451,28 +493,6 @@
       });
     }
     return transcript;
-  }
-
-  async function loadSettings(): Promise<ExtensionSettings> {
-    const stored = (await chrome.storage.local.get([...CONFIG_KEYS])) as Partial<ExtensionSettings>;
-    const authToken = typeof stored.authToken === "string" ? stored.authToken.trim() : "";
-    const backendWssUrl =
-      typeof stored.backendWssUrl === "string" ? stored.backendWssUrl.trim() : "";
-    if (authToken.length === 0) {
-      throw new Error("Missing authToken in chrome.storage.local");
-    }
-    assertWssUrl(backendWssUrl);
-    return { authToken, backendWssUrl };
-  }
-
-  function assertWssUrl(value: string): void {
-    const url = new URL(value);
-    if (url.protocol !== "wss:") {
-      throw new Error("backendWssUrl must use the wss:// protocol");
-    }
-    if (!url.pathname.endsWith("/stream")) {
-      throw new Error("backendWssUrl must point to the /stream endpoint");
-    }
   }
 
   function parseStreamChunk(value: unknown): StreamChunk {

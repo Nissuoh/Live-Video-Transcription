@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -50,6 +51,11 @@ def _validate_request_limits(request: StreamRequest, settings: Settings) -> None
             f"transcript item {oversized[0]} exceeds "
             f"{settings.max_text_chars_per_chunk} characters"
         )
+
+
+async def _drain_keepalive_messages(websocket: WebSocket) -> None:
+    while True:
+        await websocket.receive_text()
 
 
 @asynccontextmanager
@@ -118,6 +124,7 @@ def create_app() -> FastAPI:
             return
 
         await websocket.accept()
+        keepalive_drain_task: asyncio.Task[None] | None = None
         try:
             payload: Any = await websocket.receive_json()
             request = StreamRequest.model_validate(payload)
@@ -125,6 +132,8 @@ def create_app() -> FastAPI:
             if not auth_validator.is_valid(request.token):
                 await websocket.close(code=1008, reason="Invalid auth token")
                 return
+
+            keepalive_drain_task = asyncio.create_task(_drain_keepalive_messages(websocket))
 
             async def send_chunk(chunk: StreamChunk) -> None:
                 await websocket.send_json(chunk.model_dump(by_alias=True))
@@ -142,6 +151,10 @@ def create_app() -> FastAPI:
             logger.exception("stream processing failed")
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1011, reason="Stream processing failed")
+        finally:
+            if keepalive_drain_task is not None:
+                keepalive_drain_task.cancel()
+                await asyncio.gather(keepalive_drain_task, return_exceptions=True)
 
     return app
 

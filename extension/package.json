@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "package": "npm run build && node scripts/package-extension.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/chrome": "0.1.18",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "yazl": "^3.3.1"
   }
 }

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Video Translation</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header>
+        <img src="icons/icon48.png" alt="" width="40" height="40" />
+        <div>
+          <h1>Live Video Translation</h1>
+          <p>YouTube video and captions are detected automatically.</p>
+        </div>
+      </header>
+
+      <form id="options-form" novalidate>
+        <label for="backend-wss-url">Backend WebSocket URL</label>
+        <input
+          id="backend-wss-url"
+          name="backendWssUrl"
+          type="url"
+          inputmode="url"
+          placeholder="wss://example.com/stream"
+          autocomplete="url"
+          required
+        />
+
+        <label for="auth-token">API/Auth token</label>
+        <input
+          id="auth-token"
+          name="authToken"
+          type="password"
+          autocomplete="off"
+          required
+        />
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button id="reveal-token" type="button">Show token</button>
+        </div>
+
+        <p id="status" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <script type="module" src="dist/options.js"></script>
+  </body>
+</html>

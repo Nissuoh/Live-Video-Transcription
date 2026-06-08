@@ -66,4 +66,4 @@ Danach den Ordner `extension` in `chrome://extensions` als unpacked extension la
 }
 ```
 
-Die Extension akzeptiert nur `wss://` URLs für das Backend.
+Die Extension akzeptiert nur `wss://` URLs für das Backend. YouTube-Seite, aktuelles Video und Caption-Track werden automatisch erkannt; im Popup wird kein Video-Link eingegeben.
