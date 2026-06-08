@@ -16,6 +16,7 @@ const include = [
   "options.css",
   "dist",
   "icons",
+  "_locales",
 ];
 
 if (argv.includes("--clean") && existsSync(outDir)) {

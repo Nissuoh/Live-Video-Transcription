@@ -10,6 +10,8 @@
   interface StreamRequest {
     videoId: string;
     platform: Platform;
+    sourceLanguage: string;
+    targetLanguage: string;
     transcript: TranscriptItem[];
   }
 
@@ -24,6 +26,8 @@
     ok: boolean;
     enabled?: boolean;
     configured?: boolean;
+    sourceLanguage?: string;
+    targetLanguage?: string;
     error?: string;
   }
 
@@ -70,6 +74,16 @@
   const LATE_TOLERANCE_SECONDS = 0.35;
   const STALE_CHUNK_SECONDS = 30;
   const STREAM_PORT_NAME = "translation-stream";
+  const FALLBACK_MESSAGES: Record<string, string> = {
+    captionsEmptyError: "The selected caption track is empty.",
+    captionsUnavailableError: "No caption track is available for the selected language.",
+    connectionClosedError: "Live translation connection closed unexpectedly.",
+    metadataError: "Could not read the current YouTube video metadata.",
+    notConfiguredStatus:
+      "Live translation is enabled but not configured. Open the extension popup.",
+    preparingAudioStatus: "Live translation is preparing audio.",
+    videoIdError: "Could not identify the current YouTube video.",
+  };
 
   class AudioChunkScheduler {
     private readonly video: HTMLVideoElement;
@@ -260,7 +274,7 @@
       }
       if (!runState.configured) {
         this.teardown();
-        showStatus("Live translation is enabled but not configured. Open the extension popup.", "error");
+        showStatus(localizedMessage("notConfiguredStatus"), "error");
         return;
       }
 
@@ -268,13 +282,13 @@
       const playerResponse = await extractPlayerResponse();
       if (playerResponse === null) {
         this.teardown();
-        showStatus("Could not read the current YouTube video metadata.", "error");
+        showStatus(localizedMessage("metadataError"), "error");
         return;
       }
       const videoId = resolveVideoId(playerResponse);
       if (videoId === null) {
         this.teardown();
-        showStatus("Could not identify the current YouTube video.", "error");
+        showStatus(localizedMessage("videoIdError"), "error");
         return;
       }
       if (this.activeVideoId === videoId) {
@@ -284,21 +298,28 @@
       this.activeVideoId = videoId;
       this.currentVideo = video;
 
-      const track = chooseCaptionTrack(playerResponse);
+      const sourceLanguage = runState.sourceLanguage;
+      const targetLanguage = runState.targetLanguage;
+      const track = chooseCaptionTrack(playerResponse, sourceLanguage);
       if (track === null) {
-        showStatus("No caption track is available for this video.", "error");
+        showStatus(localizedMessage("captionsUnavailableError"), "error");
         return;
       }
       const transcript = await fetchTranscript(track);
       if (transcript.length === 0) {
-        showStatus("The selected caption track is empty.", "error");
+        showStatus(localizedMessage("captionsEmptyError"), "error");
         return;
       }
       this.scheduler = new AudioChunkScheduler(video);
-      this.openStream(videoId, transcript);
+      this.openStream(videoId, transcript, sourceLanguage, targetLanguage);
     }
 
-    private openStream(videoId: string, transcript: TranscriptItem[]): void {
+    private openStream(
+      videoId: string,
+      transcript: TranscriptItem[],
+      sourceLanguage: string,
+      targetLanguage: string,
+    ): void {
       const port = chrome.runtime.connect({ name: STREAM_PORT_NAME });
       this.port = port;
       port.onMessage.addListener((message: unknown) => {
@@ -312,6 +333,8 @@
       const request: StreamRequest = {
         videoId,
         platform: "youtube",
+        sourceLanguage,
+        targetLanguage,
         transcript,
       };
       port.postMessage({ type: "startStream", ...request });
@@ -331,13 +354,13 @@
         if (message.code !== 1000) {
           this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
-          showStatus("Live translation connection closed unexpectedly.", "error");
+          showStatus(localizedMessage("connectionClosedError"), "error");
         }
         return;
       }
       if (message.type === "streamOpen") {
         this.muteCurrentVideo();
-        showStatus("Live translation is preparing audio.", "info");
+        showStatus(localizedMessage("preparingAudioStatus"), "info");
         return;
       }
       if (message.type !== "streamChunk") {
@@ -385,18 +408,28 @@
     }
   }
 
-  async function getRunState(): Promise<Required<Pick<RunStateResponse, "enabled" | "configured">>> {
+  async function getRunState(): Promise<
+    Required<Pick<RunStateResponse, "enabled" | "configured" | "sourceLanguage" | "targetLanguage">>
+  > {
     try {
       const response = (await chrome.runtime.sendMessage({ type: "getRunState" })) as RunStateResponse;
       if (!response.ok) {
-        return { enabled: false, configured: false };
+        return { enabled: false, configured: false, sourceLanguage: "en", targetLanguage: "de" };
       }
       return {
         enabled: response.enabled === true,
         configured: response.configured === true,
+        sourceLanguage:
+          typeof response.sourceLanguage === "string" && response.sourceLanguage.length > 0
+            ? response.sourceLanguage
+            : "en",
+        targetLanguage:
+          typeof response.targetLanguage === "string" && response.targetLanguage.length > 0
+            ? response.targetLanguage
+            : "de",
       };
     } catch {
-      return { enabled: false, configured: false };
+      return { enabled: false, configured: false, sourceLanguage: "en", targetLanguage: "de" };
     }
   }
 
@@ -565,18 +598,38 @@
     return url.searchParams.get("v");
   }
 
-  function chooseCaptionTrack(playerResponse: YouTubePlayerResponse): CaptionTrack | null {
+  function chooseCaptionTrack(
+    playerResponse: YouTubePlayerResponse,
+    preferredLanguage: string,
+  ): CaptionTrack | null {
     const tracks =
       playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
     if (tracks.length === 0) {
       return null;
     }
     return (
+      tracks.find(
+        (track) => trackMatchesLanguage(track, preferredLanguage) && track.kind !== "asr",
+      ) ??
+      tracks.find((track) => trackMatchesLanguage(track, preferredLanguage)) ??
       tracks.find((track) => track.languageCode?.startsWith("en") && track.kind !== "asr") ??
       tracks.find((track) => track.kind !== "asr") ??
       tracks.find((track) => track.languageCode?.startsWith("en")) ??
       tracks[0] ??
       null
+    );
+  }
+
+  function trackMatchesLanguage(track: CaptionTrack, languageCode: string): boolean {
+    const trackCode = track.languageCode?.toLowerCase();
+    const preferredCode = languageCode.toLowerCase();
+    if (trackCode === undefined || preferredCode.length === 0) {
+      return false;
+    }
+    return (
+      trackCode === preferredCode ||
+      trackCode.startsWith(`${preferredCode}-`) ||
+      preferredCode.startsWith(`${trackCode}-`)
     );
   }
 
@@ -674,6 +727,16 @@
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
+  }
+
+  function localizedMessage(key: string): string {
+    if (typeof chrome !== "undefined" && chrome.i18n?.getMessage !== undefined) {
+      const localized = chrome.i18n.getMessage(key);
+      if (localized.trim().length > 0) {
+        return localized;
+      }
+    }
+    return FALLBACK_MESSAGES[key] ?? key;
   }
 
   new YouTubeTranslationController().start();

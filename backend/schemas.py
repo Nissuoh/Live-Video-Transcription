@@ -27,7 +27,17 @@ class StreamRequest(BaseModel):
     video_id: str = Field(alias="videoId", min_length=1, max_length=128)
     platform: Literal["youtube"]
     token: str = Field(min_length=1, max_length=4096)
+    source_language: str = Field(default="en", alias="sourceLanguage", min_length=2, max_length=16)
+    target_language: str = Field(default="de", alias="targetLanguage", min_length=2, max_length=16)
     transcript: list[TranscriptItem] = Field(min_length=1)
+
+    @field_validator("source_language", "target_language")
+    @classmethod
+    def normalize_language_code(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("language code must not be blank")
+        return normalized
 
 
 class StreamChunk(BaseModel):

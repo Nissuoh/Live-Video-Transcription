@@ -27,13 +27,13 @@ class TranslationPipeline:
     async def stream(self, request: StreamRequest, send_chunk: SendChunk) -> None:
         item_count = len(request.transcript)
         worker_count = min(self._settings.max_chunk_concurrency, item_count)
-        work_queue: asyncio.Queue[tuple[int, TranscriptItem] | None] = asyncio.Queue()
+        work_queue: asyncio.Queue[tuple[int, TranscriptItem, str] | None] = asyncio.Queue()
         result_queue: asyncio.Queue[tuple[int, StreamChunk | None, BaseException | None]] = (
             asyncio.Queue()
         )
 
         for index, item in enumerate(request.transcript):
-            work_queue.put_nowait((index, item))
+            work_queue.put_nowait((index, item, request.target_language))
         for _ in range(worker_count):
             work_queue.put_nowait(None)
 
@@ -59,30 +59,31 @@ class TranslationPipeline:
 
     async def _worker(
         self,
-        work_queue: asyncio.Queue[tuple[int, TranscriptItem] | None],
+        work_queue: asyncio.Queue[tuple[int, TranscriptItem, str] | None],
         result_queue: asyncio.Queue[tuple[int, StreamChunk | None, BaseException | None]],
     ) -> None:
         while True:
             work = await work_queue.get()
             if work is None:
                 return
-            index, item = work
+            index, item, target_language = work
             try:
-                chunk = await self._process_item(item)
+                chunk = await self._process_item(item, target_language=target_language)
             except BaseException as exc:
                 await result_queue.put((index, None, exc))
             else:
                 await result_queue.put((index, chunk, None))
 
-    async def _process_item(self, item: TranscriptItem) -> StreamChunk:
+    async def _process_item(self, item: TranscriptItem, *, target_language: str) -> StreamChunk:
         translated_text = await self._translator.translate(
             item.text,
             duration_seconds=item.duration,
-            target_language="de",
+            target_language=target_language,
         )
         speech = await self._tts.synthesize(
             translated_text,
             target_duration_seconds=item.duration,
+            target_language=target_language,
         )
         audio_base64 = base64.b64encode(speech.audio_bytes).decode("ascii")
         return StreamChunk(

@@ -1,0 +1,130 @@
+{
+  "appName": {
+    "message": "Live Video Translation"
+  },
+  "appDescription": {
+    "message": "Streamt synchronisierte uebersetzte Sprache fuer YouTube-Untertitel ueber ein sicheres WebSocket-Backend."
+  },
+  "productEyebrow": {
+    "message": "YouTube-Audio-Uebersetzer"
+  },
+  "popupSubtitle": {
+    "message": "Das aktuelle YouTube-Video wird automatisch erkannt, wenn die Uebersetzung aktiviert ist."
+  },
+  "optionsSubtitle": {
+    "message": "Sichere Backend-Konfiguration fuer synchronisierte YouTube-Audio-Uebersetzung."
+  },
+  "connectionSection": {
+    "message": "Verbindung"
+  },
+  "languageSection": {
+    "message": "Sprache"
+  },
+  "automationSection": {
+    "message": "Automatik"
+  },
+  "backendUrlLabel": {
+    "message": "Backend-WebSocket-URL"
+  },
+  "backendUrlPlaceholder": {
+    "message": "wss://example.com/stream"
+  },
+  "authTokenLabel": {
+    "message": "API/Auth-Token"
+  },
+  "sourceLanguageLabel": {
+    "message": "Von"
+  },
+  "targetLanguageLabel": {
+    "message": "Nach"
+  },
+  "autoTranslateLabel": {
+    "message": "Automatische Uebersetzung auf YouTube aktivieren"
+  },
+  "aiDisclosure": {
+    "message": "Uebersetzte Sprache wird per KI erzeugt und ueber dein konfiguriertes Backend gesendet."
+  },
+  "saveButton": {
+    "message": "Speichern"
+  },
+  "showTokenButton": {
+    "message": "Token anzeigen"
+  },
+  "hideTokenButton": {
+    "message": "Token ausblenden"
+  },
+  "savedStatus": {
+    "message": "Gespeichert."
+  },
+  "storageUnavailableError": {
+    "message": "Chrome-Erweiterungsspeicher ist in diesem Kontext nicht verfuegbar."
+  },
+  "tokenRequiredError": {
+    "message": "Auth-Token ist erforderlich, wenn automatische Uebersetzung aktiviert ist."
+  },
+  "settingsInvalidError": {
+    "message": "Einstellungen sind ungueltig."
+  },
+  "backendWssError": {
+    "message": "Backend-URL muss mit wss:// beginnen."
+  },
+  "backendStreamPathError": {
+    "message": "Backend-URL muss auf /stream zeigen."
+  },
+  "notConfiguredStatus": {
+    "message": "Live-Uebersetzung ist aktiviert, aber nicht konfiguriert. Oeffne das Erweiterungs-Popup."
+  },
+  "metadataError": {
+    "message": "Die Metadaten des aktuellen YouTube-Videos konnten nicht gelesen werden."
+  },
+  "videoIdError": {
+    "message": "Das aktuelle YouTube-Video konnte nicht identifiziert werden."
+  },
+  "captionsUnavailableError": {
+    "message": "Fuer die gewaehlte Sprache ist keine Untertitelspur verfuegbar."
+  },
+  "captionsEmptyError": {
+    "message": "Die ausgewaehlte Untertitelspur ist leer."
+  },
+  "connectionClosedError": {
+    "message": "Live-Uebersetzungsverbindung wurde unerwartet geschlossen."
+  },
+  "preparingAudioStatus": {
+    "message": "Live-Uebersetzung bereitet Audio vor."
+  },
+  "runtimeUnknownError": {
+    "message": "Unbekannter Laufzeitfehler"
+  },
+  "unsupportedMessageError": {
+    "message": "Nicht unterstuetzte Nachricht"
+  },
+  "untrustedSenderError": {
+    "message": "Nicht vertrauenswuerdiger Sender"
+  },
+  "invalidContentMessageError": {
+    "message": "Ungueltige Content-Script-Nachricht"
+  },
+  "unknownStreamError": {
+    "message": "Unbekannter Stream-Fehler"
+  },
+  "streamMessageUnsupportedError": {
+    "message": "Nicht unterstuetzte Content-Script-Nachricht"
+  },
+  "autoTranslationDisabledError": {
+    "message": "Automatische Uebersetzung ist deaktiviert."
+  },
+  "missingTokenError": {
+    "message": "Auth-Token fehlt. Oeffne die Erweiterungsoptionen und speichere einen Token."
+  },
+  "backendUrlInvalidError": {
+    "message": "Backend-URL muss wss:// verwenden und auf /stream zeigen"
+  },
+  "missingElementError": {
+    "message": "Erforderliches Element fehlt: $SELECTOR$",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  }
+}

@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Live Video Translation",
+  "name": "__MSG_appName__",
   "version": "1.0.0",
-  "description": "Streams synchronized German TTS audio for YouTube captions through a secure WebSocket backend.",
+  "description": "__MSG_appDescription__",
+  "default_locale": "en",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],
   "host_permissions": ["https://*.youtube.com/*", "https://youtube.com/*"],
@@ -13,7 +14,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Live Video Translation",
+    "default_title": "__MSG_appName__",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

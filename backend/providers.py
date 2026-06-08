@@ -46,6 +46,97 @@ def _bounded_rate(value: float, maximum: float) -> float:
     return max(1.0, min(maximum, value))
 
 
+def _language_name(language_code: str) -> str:
+    names = {
+        "ar": "Arabisch",
+        "da": "Daenisch",
+        "de": "Deutsch",
+        "de-de": "Deutsch",
+        "en": "Englisch",
+        "en-us": "Englisch",
+        "en-gb": "Englisch",
+        "es": "Spanisch",
+        "fi": "Finnisch",
+        "fr": "Franzoesisch",
+        "hi": "Hindi",
+        "it": "Italienisch",
+        "ja": "Japanisch",
+        "ko": "Koreanisch",
+        "nl": "Niederlaendisch",
+        "no": "Norwegisch",
+        "pl": "Polnisch",
+        "pt": "Portugiesisch",
+        "pt-br": "Portugiesisch",
+        "pt-pt": "Portugiesisch",
+        "ru": "Russisch",
+        "sv": "Schwedisch",
+        "tr": "Tuerkisch",
+        "uk": "Ukrainisch",
+        "zh": "Chinesisch",
+    }
+    return names.get(language_code.lower(), language_code)
+
+
+def _deepl_target_language(language_code: str, fallback: str) -> str:
+    normalized = language_code.strip().upper().replace("-", "_")
+    supported = {
+        "AR",
+        "BG",
+        "CS",
+        "DA",
+        "DE",
+        "EL",
+        "EN",
+        "EN_GB",
+        "EN_US",
+        "ES",
+        "ET",
+        "FI",
+        "FR",
+        "HU",
+        "ID",
+        "IT",
+        "JA",
+        "KO",
+        "LT",
+        "LV",
+        "NB",
+        "NL",
+        "PL",
+        "PT",
+        "PT_BR",
+        "PT_PT",
+        "RO",
+        "RU",
+        "SK",
+        "SL",
+        "SV",
+        "TR",
+        "UK",
+        "ZH",
+    }
+    aliases = {
+        "NO": "NB",
+        "ZH_HANS": "ZH",
+        "ZH_HANT": "ZH",
+    }
+    candidate = aliases.get(normalized, normalized)
+    if candidate in supported:
+        return candidate
+    primary = candidate.split("_", 1)[0]
+    if primary in supported:
+        return primary
+    return fallback
+
+
+def _primary_language_subtag(language_code: str, fallback: str) -> str:
+    normalized = language_code.strip().lower().replace("_", "-")
+    primary = normalized.split("-", 1)[0]
+    if 2 <= len(primary) <= 3 and primary.isalpha():
+        return primary
+    return fallback
+
+
 def _duration_guard(text: str, duration_seconds: float, chars_per_second: float) -> str:
     max_chars = max(24, int(duration_seconds * chars_per_second))
     normalized = _clean_output(text)
@@ -121,8 +212,9 @@ class OpenAITranslator(TranslationProvider):
         duration_seconds: float,
         target_language: str = "de",
     ) -> str:
+        target_name = _language_name(target_language)
         prompt = (
-            "\u00dcbersetze ins Deutsche. "
+            f"\u00dcbersetze ins {target_name}. "
             f"Komprimiere semantisch, sodass die Sprechdauer {duration_seconds:.2f} Sekunden "
             "nicht \u00fcberschreitet. Nur nackter Output."
         )
@@ -179,7 +271,10 @@ class DeepLTranslator(TranslationProvider):
             },
             json={
                 "text": [text],
-                "target_lang": self._settings.deepl_target_lang,
+                "target_lang": _deepl_target_language(
+                    target_language,
+                    self._settings.deepl_target_lang,
+                ),
             },
             timeout=self._settings.provider_timeout_seconds,
         )
@@ -209,6 +304,7 @@ class OpenAITTS(TTSProvider):
         text: str,
         *,
         target_duration_seconds: float,
+        target_language: str = "de",
     ) -> TTSResult:
         estimated_seconds = _estimated_speech_seconds(
             text,
@@ -258,9 +354,14 @@ class ElevenLabsTTS(TTSProvider):
         text: str,
         *,
         target_duration_seconds: float,
+        target_language: str = "de",
     ) -> TTSResult:
         voice_id = self._settings.elevenlabs_voice_id
         assert voice_id is not None
+        language_code = _primary_language_subtag(
+            target_language,
+            self._settings.elevenlabs_language_code,
+        )
         response = await _post_with_retries(
             "ElevenLabs TTS",
             self._client,
@@ -274,7 +375,7 @@ class ElevenLabsTTS(TTSProvider):
             json={
                 "text": text,
                 "model_id": self._settings.elevenlabs_model_id,
-                "language_code": self._settings.elevenlabs_language_code,
+                "language_code": language_code,
             },
             timeout=self._settings.provider_timeout_seconds,
         )

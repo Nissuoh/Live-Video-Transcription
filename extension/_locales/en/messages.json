@@ -1,0 +1,130 @@
+{
+  "appName": {
+    "message": "Live Video Translation"
+  },
+  "appDescription": {
+    "message": "Streams synchronized translated speech for YouTube captions through a secure WebSocket backend."
+  },
+  "productEyebrow": {
+    "message": "YouTube audio translator"
+  },
+  "popupSubtitle": {
+    "message": "The current YouTube video is detected automatically when translation is enabled."
+  },
+  "optionsSubtitle": {
+    "message": "Secure backend configuration for synchronized YouTube audio translation."
+  },
+  "connectionSection": {
+    "message": "Connection"
+  },
+  "languageSection": {
+    "message": "Language"
+  },
+  "automationSection": {
+    "message": "Automation"
+  },
+  "backendUrlLabel": {
+    "message": "Backend WebSocket URL"
+  },
+  "backendUrlPlaceholder": {
+    "message": "wss://example.com/stream"
+  },
+  "authTokenLabel": {
+    "message": "API/Auth token"
+  },
+  "sourceLanguageLabel": {
+    "message": "From"
+  },
+  "targetLanguageLabel": {
+    "message": "To"
+  },
+  "autoTranslateLabel": {
+    "message": "Enable automatic translation on YouTube"
+  },
+  "aiDisclosure": {
+    "message": "Translated speech is AI-generated and sent through your configured backend."
+  },
+  "saveButton": {
+    "message": "Save"
+  },
+  "showTokenButton": {
+    "message": "Show token"
+  },
+  "hideTokenButton": {
+    "message": "Hide token"
+  },
+  "savedStatus": {
+    "message": "Saved."
+  },
+  "storageUnavailableError": {
+    "message": "Chrome extension storage is unavailable in this context."
+  },
+  "tokenRequiredError": {
+    "message": "Auth token is required when automatic translation is enabled."
+  },
+  "settingsInvalidError": {
+    "message": "Settings are invalid."
+  },
+  "backendWssError": {
+    "message": "Backend URL must start with wss://."
+  },
+  "backendStreamPathError": {
+    "message": "Backend URL must point to /stream."
+  },
+  "notConfiguredStatus": {
+    "message": "Live translation is enabled but not configured. Open the extension popup."
+  },
+  "metadataError": {
+    "message": "Could not read the current YouTube video metadata."
+  },
+  "videoIdError": {
+    "message": "Could not identify the current YouTube video."
+  },
+  "captionsUnavailableError": {
+    "message": "No caption track is available for the selected language."
+  },
+  "captionsEmptyError": {
+    "message": "The selected caption track is empty."
+  },
+  "connectionClosedError": {
+    "message": "Live translation connection closed unexpectedly."
+  },
+  "preparingAudioStatus": {
+    "message": "Live translation is preparing audio."
+  },
+  "runtimeUnknownError": {
+    "message": "Unknown runtime error"
+  },
+  "unsupportedMessageError": {
+    "message": "Unsupported message"
+  },
+  "untrustedSenderError": {
+    "message": "Untrusted sender"
+  },
+  "invalidContentMessageError": {
+    "message": "Invalid content script message"
+  },
+  "unknownStreamError": {
+    "message": "Unknown stream error"
+  },
+  "streamMessageUnsupportedError": {
+    "message": "Unsupported content script message"
+  },
+  "autoTranslationDisabledError": {
+    "message": "Automatic translation is disabled."
+  },
+  "missingTokenError": {
+    "message": "Missing auth token. Open the extension options and save a token."
+  },
+  "backendUrlInvalidError": {
+    "message": "Backend URL must use wss:// and point to /stream"
+  },
+  "missingElementError": {
+    "message": "Missing required element: $SELECTOR$",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  }
+}

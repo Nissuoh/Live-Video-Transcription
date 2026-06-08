@@ -11,6 +11,8 @@
     type: "startStream";
     videoId: string;
     platform: Platform;
+    sourceLanguage: string;
+    targetLanguage: string;
     transcript: TranscriptItem[];
   }
 
@@ -24,6 +26,8 @@
     videoId: string;
     platform: Platform;
     token: string;
+    sourceLanguage: string;
+    targetLanguage: string;
     transcript: TranscriptItem[];
   }
 
@@ -38,6 +42,8 @@
     authToken?: string;
     backendWssUrl?: string;
     autoTranslate?: boolean;
+    sourceLanguage?: string;
+    targetLanguage?: string;
   }
 
   interface StreamSession {
@@ -46,11 +52,28 @@
     port: chrome.runtime.Port;
   }
 
-  const CONFIG_KEYS = ["authToken", "backendWssUrl", "autoTranslate"] as const;
+  const CONFIG_KEYS = [
+    "authToken",
+    "backendWssUrl",
+    "autoTranslate",
+    "sourceLanguage",
+    "targetLanguage",
+  ] as const;
   const STREAM_PORT_NAME = "translation-stream";
   const KEEPALIVE_INTERVAL_MS = 20_000;
   const MAX_TRANSCRIPT_ITEMS = 2000;
   const MAX_TEXT_CHARS_PER_CHUNK = 4000;
+  const FALLBACK_MESSAGES: Record<string, string> = {
+    autoTranslationDisabledError: "Automatic translation is disabled.",
+    backendUrlInvalidError: "Backend URL must use wss:// and point to /stream",
+    invalidContentMessageError: "Invalid content script message",
+    missingTokenError: "Missing auth token. Open the extension options and save a token.",
+    runtimeUnknownError: "Unknown runtime error",
+    streamMessageUnsupportedError: "Unsupported content script message",
+    unknownStreamError: "Unknown stream error",
+    unsupportedMessageError: "Unsupported message",
+    untrustedSenderError: "Untrusted sender",
+  };
   const sessions = new Map<string, StreamSession>();
 
   void restrictStorageAccess();
@@ -68,6 +91,12 @@
     if (typeof existing.autoTranslate !== "boolean") {
       defaults.autoTranslate = false;
     }
+    if (typeof existing.sourceLanguage !== "string") {
+      defaults.sourceLanguage = "en";
+    }
+    if (typeof existing.targetLanguage !== "string") {
+      defaults.targetLanguage = "de";
+    }
     if (Object.keys(defaults).length > 0) {
       await chrome.storage.local.set(defaults);
     }
@@ -79,7 +108,7 @@
       .catch((error: unknown) => {
         sendResponse({
           ok: false,
-          error: error instanceof Error ? error.message : "Unknown runtime error",
+          error: error instanceof Error ? error.message : localizedMessage("runtimeUnknownError"),
         });
       });
     return true;
@@ -118,20 +147,30 @@
     sender: chrome.runtime.MessageSender,
   ): Promise<unknown> {
     if (!isRecord(message) || message.type !== "getRunState") {
-      return { ok: false, error: "Unsupported message" };
+      return { ok: false, error: localizedMessage("unsupportedMessageError") };
     }
     if (!isTrustedYouTubeSender(sender)) {
-      return { ok: false, error: "Untrusted sender" };
+      return { ok: false, error: localizedMessage("untrustedSenderError") };
     }
     const config = (await chrome.storage.local.get([...CONFIG_KEYS])) as ExtensionConfig;
     const enabled = config.autoTranslate === true;
     const authToken = typeof config.authToken === "string" ? config.authToken.trim() : "";
     const backendWssUrl =
       typeof config.backendWssUrl === "string" ? config.backendWssUrl.trim() : "";
+    const sourceLanguage =
+      typeof config.sourceLanguage === "string" && config.sourceLanguage.trim().length > 0
+        ? config.sourceLanguage.trim()
+        : "en";
+    const targetLanguage =
+      typeof config.targetLanguage === "string" && config.targetLanguage.trim().length > 0
+        ? config.targetLanguage.trim()
+        : "de";
     return {
       ok: true,
       enabled,
       configured: enabled && authToken.length > 0 && isValidWssStreamUrl(backendWssUrl),
+      sourceLanguage,
+      targetLanguage,
     };
   }
 
@@ -141,14 +180,14 @@
     message: unknown,
   ): Promise<void> {
     if (!isRecord(message) || typeof message.type !== "string") {
-      throw new Error("Invalid content script message");
+      throw new Error(localizedMessage("invalidContentMessageError"));
     }
     if (message.type === "stopStream") {
       closeSession(sessionId, "client requested stop");
       return;
     }
     if (message.type !== "startStream") {
-      throw new Error("Unsupported content script message");
+      throw new Error(localizedMessage("streamMessageUnsupportedError"));
     }
     const startMessage = parseStartMessage(message);
     const config = await loadConfig();
@@ -175,6 +214,8 @@
         videoId: message.videoId,
         platform: message.platform,
         token: config.authToken,
+        sourceLanguage: config.sourceLanguage,
+        targetLanguage: config.targetLanguage,
         transcript: normalizeTranscript(message.transcript),
       };
       socket.send(JSON.stringify(request));
@@ -196,7 +237,7 @@
       } catch (error: unknown) {
         safePost(port, {
           type: "streamError",
-          error: error instanceof Error ? error.message : "Invalid stream chunk",
+          error: error instanceof Error ? error.message : localizedMessage("unknownStreamError"),
         });
       }
     });
@@ -244,23 +285,37 @@
     const backendWssUrl =
       typeof stored.backendWssUrl === "string" ? stored.backendWssUrl.trim() : "";
     if (stored.autoTranslate !== true) {
-      throw new Error("Automatic translation is disabled.");
+      throw new Error(localizedMessage("autoTranslationDisabledError"));
     }
     if (authToken.length === 0) {
-      throw new Error("Missing auth token. Open the extension options and save a token.");
+      throw new Error(localizedMessage("missingTokenError"));
     }
     assertWssUrl(backendWssUrl);
-    return { authToken, backendWssUrl, autoTranslate: true };
+    const sourceLanguage =
+      typeof stored.sourceLanguage === "string" ? stored.sourceLanguage.trim() : "en";
+    const targetLanguage =
+      typeof stored.targetLanguage === "string" ? stored.targetLanguage.trim() : "de";
+    return {
+      authToken,
+      backendWssUrl,
+      autoTranslate: true,
+      sourceLanguage: sourceLanguage || "en",
+      targetLanguage: targetLanguage || "de",
+    };
   }
 
   function parseStartMessage(value: Record<string, unknown>): StartStreamMessage {
     const videoId = value.videoId;
     const platform = value.platform;
+    const sourceLanguage = value.sourceLanguage;
+    const targetLanguage = value.targetLanguage;
     const transcript = value.transcript;
     if (
       typeof videoId !== "string" ||
       videoId.length === 0 ||
       platform !== "youtube" ||
+      typeof sourceLanguage !== "string" ||
+      typeof targetLanguage !== "string" ||
       !Array.isArray(transcript)
     ) {
       throw new Error("Invalid startStream message");
@@ -269,6 +324,8 @@
       type: "startStream",
       videoId,
       platform,
+      sourceLanguage,
+      targetLanguage,
       transcript: transcript.map(parseTranscriptItem),
     };
   }
@@ -325,7 +382,7 @@
 
   function assertWssUrl(value: string): void {
     if (!isValidWssStreamUrl(value)) {
-      throw new Error("Backend URL must use wss:// and point to /stream");
+      throw new Error(localizedMessage("backendUrlInvalidError"));
     }
   }
 
@@ -366,5 +423,15 @@
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
+  }
+
+  function localizedMessage(key: string): string {
+    if (typeof chrome !== "undefined" && chrome.i18n?.getMessage !== undefined) {
+      const localized = chrome.i18n.getMessage(key);
+      if (localized.trim().length > 0) {
+        return localized;
+      }
+    }
+    return FALLBACK_MESSAGES[key] ?? key;
   }
 })();

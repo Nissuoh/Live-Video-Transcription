@@ -21,6 +21,7 @@ This document tracks non-code work that must be completed before submitting the 
   - Provide a production `wss://.../stream` backend URL.
   - Provide a YouTube video URL with captions enabled.
   - Explain that no video URL is entered in the extension; the current tab is detected automatically.
+  - Explain that the default language flow is English captions to German speech and that language names are rendered in the reviewer's browser language.
 
 ## Privacy Fields
 
@@ -28,6 +29,11 @@ This document tracks non-code work that must be completed before submitting the 
   - Website content: caption text and timestamps from the active YouTube video.
   - Web browsing activity: current YouTube video id/page context, only for the user-facing translation feature.
   - Authentication information: extension auth token stored locally in `chrome.storage.local`.
+- User-facing popup controls:
+  - Backend WSS URL.
+  - API/Auth token.
+  - Source and target language selection.
+  - Automatic translation opt-in toggle.
 - Permissions justification:
   - `storage`: stores backend WSS URL, auth token, and enablement preference locally.
   - `host_permissions` for YouTube: reads the active YouTube video metadata and caption track required for translation.
