@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Video Translation Store Screenshot</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        color: #172033;
+        background: #eef2f7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        width: 1280px;
+        height: 800px;
+        margin: 0;
+        overflow: hidden;
+        background: #eef2f7;
+      }
+
+      .shot {
+        display: grid;
+        grid-template-columns: 1fr 390px;
+        gap: 28px;
+        width: 1280px;
+        height: 800px;
+        padding: 48px;
+      }
+
+      .browser {
+        min-width: 0;
+        border: 1px solid #d3dce9;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 18px 45px rgba(23, 32, 51, 0.12);
+        overflow: hidden;
+      }
+
+      .browser-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 46px;
+        padding: 0 16px;
+        border-bottom: 1px solid #e2e8f1;
+        background: #f8fafc;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #d0d8e5;
+      }
+
+      .address {
+        flex: 1;
+        height: 26px;
+        border: 1px solid #d5deeb;
+        border-radius: 6px;
+        padding: 5px 10px;
+        color: #526078;
+        background: #ffffff;
+        font-size: 12px;
+      }
+
+      .youtube {
+        display: grid;
+        grid-template-columns: 1fr 265px;
+        gap: 18px;
+        padding: 24px;
+      }
+
+      .video {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(23, 32, 51, 0.92), rgba(29, 111, 214, 0.54)),
+          #172033;
+        overflow: hidden;
+      }
+
+      .play {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 72px;
+        height: 72px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.92);
+      }
+
+      .play::after {
+        position: absolute;
+        left: 29px;
+        top: 22px;
+        width: 0;
+        height: 0;
+        border-top: 14px solid transparent;
+        border-bottom: 14px solid transparent;
+        border-left: 22px solid #1d6fd6;
+        content: "";
+      }
+
+      .status {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        max-width: 360px;
+        border: 1px solid #dbe4ef;
+        border-radius: 7px;
+        padding: 10px 12px;
+        background: #ffffff;
+        color: #172033;
+        box-shadow: 0 10px 28px rgba(23, 32, 51, 0.22);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .video-meta {
+        margin-top: 18px;
+      }
+
+      .video-title {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 760;
+        line-height: 1.25;
+      }
+
+      .video-subtitle {
+        margin: 8px 0 0;
+        color: #526078;
+        font-size: 14px;
+      }
+
+      .side-panel {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .caption-card,
+      .sync-card {
+        border: 1px solid #d9e1ed;
+        border-radius: 8px;
+        padding: 14px;
+        background: #ffffff;
+      }
+
+      .card-title {
+        margin: 0 0 10px;
+        color: #1f6f55;
+        font-size: 12px;
+        font-weight: 760;
+        text-transform: uppercase;
+      }
+
+      .line {
+        height: 10px;
+        margin-top: 9px;
+        border-radius: 999px;
+        background: #dce6f2;
+      }
+
+      .line.short {
+        width: 72%;
+      }
+
+      .meters {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 7px;
+        height: 52px;
+        align-items: end;
+      }
+
+      .meter {
+        border-radius: 5px 5px 0 0;
+        background: #1f6f55;
+      }
+
+      .popup {
+        align-self: center;
+        border: 1px solid #d3dce9;
+        border-radius: 8px;
+        padding: 14px;
+        background: #f8fafc;
+        box-shadow: 0 18px 45px rgba(23, 32, 51, 0.13);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px;
+        border: 1px solid #d9e1ed;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .brand img {
+        width: 48px;
+        height: 48px;
+        border-radius: 8px;
+      }
+
+      .eyebrow {
+        margin: 0 0 3px;
+        color: #1f6f55;
+        font-size: 11px;
+        font-weight: 760;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 19px;
+        line-height: 1.2;
+      }
+
+      .brand p:last-child {
+        margin: 4px 0 0;
+        color: #526078;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .section {
+        margin-top: 12px;
+        border: 1px solid #d9e1ed;
+        border-radius: 8px;
+        padding: 14px;
+        background: #ffffff;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 13px;
+      }
+
+      label {
+        display: block;
+        margin-top: 9px;
+        color: #253349;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .input,
+      .select {
+        display: flex;
+        align-items: center;
+        height: 42px;
+        margin-top: 7px;
+        border: 1px solid #b8c3d4;
+        border-radius: 7px;
+        padding: 0 12px;
+        background: #ffffff;
+        font-size: 13px;
+      }
+
+      .language-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .check-row {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: 10px;
+        align-items: start;
+        margin-top: 4px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .checkbox {
+        width: 17px;
+        height: 17px;
+        border: 1px solid #1f6f55;
+        border-radius: 4px;
+        background: #1f6f55;
+      }
+
+      .checkbox::after {
+        display: block;
+        margin-left: 4px;
+        color: #ffffff;
+        font-size: 12px;
+        line-height: 16px;
+        content: "✓";
+      }
+
+      .notice {
+        margin-top: 10px;
+        border-left: 3px solid #c98b2c;
+        border-radius: 6px;
+        padding: 9px 10px;
+        background: #fff7e8;
+        color: #5f4a22;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .button {
+        min-height: 40px;
+        border: 1px solid #1f6f55;
+        border-radius: 7px;
+        padding: 11px 15px;
+        background: #1f6f55;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 760;
+        text-align: center;
+      }
+
+      .button.secondary {
+        border-color: #b8c3d4;
+        background: #ffffff;
+        color: #253349;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shot">
+      <section class="browser" aria-label="YouTube preview">
+        <div class="browser-top">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <div class="address">youtube.com/watch?v=demo</div>
+        </div>
+        <div class="youtube">
+          <div>
+            <div class="video">
+              <div class="play"></div>
+              <div class="status" data-text="status"></div>
+            </div>
+            <div class="video-meta">
+              <h2 class="video-title" data-text="videoTitle"></h2>
+              <p class="video-subtitle" data-text="videoSubtitle"></p>
+            </div>
+          </div>
+          <aside class="side-panel">
+            <div class="caption-card">
+              <p class="card-title" data-text="captionsTitle"></p>
+              <div class="line"></div>
+              <div class="line short"></div>
+              <div class="line"></div>
+            </div>
+            <div class="sync-card">
+              <p class="card-title" data-text="syncTitle"></p>
+              <div class="meters">
+                <div class="meter" style="height: 32px"></div>
+                <div class="meter" style="height: 46px"></div>
+                <div class="meter" style="height: 24px"></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="popup" aria-label="Extension popup">
+        <div class="brand">
+          <img src="../../icons/icon128.png" alt="" />
+          <div>
+            <p class="eyebrow" data-text="eyebrow"></p>
+            <h1>Live Video Translation</h1>
+            <p data-text="subtitle"></p>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 data-text="connection"></h2>
+          <label data-text="backend"></label>
+          <div class="input">wss://api.example.com/stream</div>
+          <label data-text="token"></label>
+          <div class="input">••••••••••••••••</div>
+        </div>
+
+        <div class="section">
+          <h2 data-text="language"></h2>
+          <div class="language-grid">
+            <div>
+              <label data-text="from"></label>
+              <div class="select" data-text="source"></div>
+            </div>
+            <div>
+              <label data-text="to"></label>
+              <div class="select" data-text="target"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 data-text="automation"></h2>
+          <div class="check-row">
+            <div class="checkbox"></div>
+            <div data-text="auto"></div>
+          </div>
+          <div class="notice" data-text="notice"></div>
+        </div>
+
+        <div class="actions">
+          <div class="button" data-text="save"></div>
+          <div class="button secondary" data-text="showToken"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const locale = params.get("locale") === "de" ? "de-DE" : "en-US";
+      const copy = {
+        "de-DE": {
+          auto: "Automatische Übersetzung auf YouTube aktivieren",
+          automation: "Automatik",
+          backend: "Backend-WebSocket-URL",
+          captionsTitle: "Untertitel erkannt",
+          connection: "Verbindung",
+          eyebrow: "YouTube-Audio-Übersetzer",
+          from: "Von",
+          language: "Sprache",
+          notice:
+            "Übersetzte Sprache wird per KI erzeugt und über dein konfiguriertes Backend gesendet.",
+          save: "Speichern",
+          showToken: "Token anzeigen",
+          status: "Live-Übersetzung bereitet synchronisiertes Audio vor.",
+          subtitle:
+            "Das aktuelle YouTube-Video wird automatisch erkannt, wenn die Übersetzung aktiviert ist.",
+          syncTitle: "Audio-Synchronisation",
+          to: "Nach",
+          token: "API/Auth-Token",
+          videoSubtitle: "Originalton wird erst nach erfolgreicher Backend-Verbindung stummgeschaltet.",
+          videoTitle: "Englisches Video öffnen, Erweiterung aktivieren, deutsche Stimme hören",
+        },
+        "en-US": {
+          auto: "Enable automatic translation on YouTube",
+          automation: "Automation",
+          backend: "Backend WebSocket URL",
+          captionsTitle: "Captions detected",
+          connection: "Connection",
+          eyebrow: "YouTube audio translator",
+          from: "From",
+          language: "Language",
+          notice:
+            "Translated speech is AI-generated and sent through your configured backend.",
+          save: "Save",
+          showToken: "Show token",
+          status: "Live translation is preparing synchronized audio.",
+          subtitle:
+            "The current YouTube video is detected automatically when translation is enabled.",
+          syncTitle: "Audio synchronization",
+          to: "To",
+          token: "API/Auth token",
+          videoSubtitle: "Original audio is muted only after the backend connection opens.",
+          videoTitle: "Open an English video, enable the extension, hear German speech",
+        },
+      };
+
+      document.documentElement.lang = locale;
+      const languageNames = new Intl.DisplayNames([locale], { type: "language" });
+      const text = {
+        ...copy[locale],
+        source: `${languageNames.of("en")} (EN)`,
+        target: `${languageNames.of("de")} (DE)`,
+      };
+      document.querySelectorAll("[data-text]").forEach((element) => {
+        const key = element.dataset.text;
+        element.textContent = text[key] || "";
+      });
+    </script>
+  </body>
+</html>
