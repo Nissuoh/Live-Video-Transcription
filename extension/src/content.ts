@@ -413,7 +413,7 @@
         if (message.code !== 1000) {
           this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
-          showStatus(localizedMessage("connectionClosedError"), "error");
+          showStatus(formatStreamClosedStatus(message), "error");
         }
         return;
       }
@@ -1775,6 +1775,15 @@
       return `Live Video Translation: ${error.message}`;
     }
     return "Live Video Translation could not start on this YouTube page.";
+  }
+
+  function formatStreamClosedStatus(message: Record<string, unknown>): string {
+    const code = typeof message.code === "number" ? message.code : "unknown";
+    const reason =
+      typeof message.reason === "string" && message.reason.trim().length > 0
+        ? message.reason.trim()
+        : "No close reason provided";
+    return `${localizedMessage("connectionClosedError")} Code: ${code}. Reason: ${reason}.`;
   }
 
   function normalizeError(error: unknown): Error {

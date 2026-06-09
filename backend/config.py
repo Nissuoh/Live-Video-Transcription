@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     auth_tokens: str = Field(min_length=1)
     translation_provider: Literal["openai", "deepl", "openrouter"] = "openai"
-    tts_provider: Literal["openai", "elevenlabs"] = "openai"
+    tts_provider: Literal["openai", "elevenlabs", "windows_sapi"] = "openai"
 
     max_chunk_concurrency: int = Field(default=3, ge=1, le=16)
     max_transcript_items: int = Field(default=2000, ge=1, le=20000)
@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     elevenlabs_model_id: str = "eleven_multilingual_v2"
     elevenlabs_output_format: str = "mp3_44100_128"
     elevenlabs_language_code: str = "de"
+
+    windows_sapi_voice: str | None = None
+    windows_sapi_rate: int = Field(default=0, ge=-10, le=10)
 
     duration_guard_chars_per_second: float = Field(default=14.0, gt=1, le=40)
     tts_max_playback_rate: float = Field(default=1.35, ge=1.0, le=4.0)

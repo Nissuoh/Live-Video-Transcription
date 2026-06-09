@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 import asyncio
+import os
+import tempfile
 from typing import Any
 
 import httpx
@@ -152,6 +154,25 @@ async def _raise_for_provider_error(provider: str, response: httpx.Response) -> 
     body = response.text[:1000]
     raise ProviderRequestError(
         f"{provider} request failed with HTTP {response.status_code}: {body}"
+    )
+
+
+def _should_retry_openai_tts_with_legacy_model(response: httpx.Response, model: str) -> bool:
+    if response.is_success or model == "tts-1":
+        return False
+    if response.status_code not in {403, 404}:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return False
+    code = error.get("code")
+    message = error.get("message")
+    return code == "model_not_found" or (
+        isinstance(message, str) and "does not have access to model" in message
     )
 
 
@@ -394,17 +415,46 @@ class OpenAITTS(TTSProvider):
             estimated_seconds / max(target_duration_seconds, 0.25),
             self._settings.tts_max_playback_rate,
         )
+        response = await self._request_speech(
+            model=self._settings.openai_tts_model,
+            text=text,
+            speed=speed,
+            include_instructions=True,
+        )
+        if _should_retry_openai_tts_with_legacy_model(response, self._settings.openai_tts_model):
+            response = await self._request_speech(
+                model="tts-1",
+                text=text,
+                speed=speed,
+                include_instructions=False,
+            )
+        await _raise_for_provider_error("OpenAI TTS", response)
+        return TTSResult(
+            audio_bytes=response.content,
+            mime_type=f"audio/{self._settings.openai_tts_response_format}",
+            suggested_playback_rate=1.0,
+        )
+
+    async def _request_speech(
+        self,
+        *,
+        model: str,
+        text: str,
+        speed: float,
+        include_instructions: bool,
+    ) -> httpx.Response:
         body: dict[str, Any] = {
-            "model": self._settings.openai_tts_model,
+            "model": model,
             "voice": self._settings.openai_tts_voice,
             "input": text,
             "response_format": self._settings.openai_tts_response_format,
             "speed": speed,
         }
-        if self._settings.openai_tts_instructions.strip():
-            body["instructions"] = self._settings.openai_tts_instructions.strip()
+        instructions = self._settings.openai_tts_instructions.strip()
+        if include_instructions and instructions and not model.startswith("tts-1"):
+            body["instructions"] = instructions
 
-        response = await _post_with_retries(
+        return await _post_with_retries(
             "OpenAI TTS",
             self._client,
             self._settings,
@@ -412,12 +462,6 @@ class OpenAITTS(TTSProvider):
             headers={"Authorization": f"Bearer {self._api_key}"},
             json=body,
             timeout=self._settings.provider_timeout_seconds,
-        )
-        await _raise_for_provider_error("OpenAI TTS", response)
-        return TTSResult(
-            audio_bytes=response.content,
-            mime_type=f"audio/{self._settings.openai_tts_response_format}",
-            suggested_playback_rate=1.0,
         )
 
 
@@ -475,6 +519,119 @@ class ElevenLabsTTS(TTSProvider):
         )
 
 
+class WindowsSapiTTS(TTSProvider):
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        if os.name != "nt":
+            raise ProviderConfigurationError("Windows SAPI TTS is only available on Windows")
+        self._settings = settings
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        target_duration_seconds: float,
+        target_language: str = "de",
+    ) -> TTSResult:
+        audio_bytes = await self._synthesize_wav(text, target_language=target_language)
+        estimated_seconds = _estimated_speech_seconds(
+            text,
+            self._settings.duration_guard_chars_per_second,
+        )
+        suggested_rate = _bounded_rate(
+            estimated_seconds / max(target_duration_seconds, 0.25),
+            self._settings.tts_max_playback_rate,
+        )
+        return TTSResult(
+            audio_bytes=audio_bytes,
+            mime_type="audio/wav",
+            suggested_playback_rate=suggested_rate,
+        )
+
+    async def _synthesize_wav(self, text: str, *, target_language: str) -> bytes:
+        output = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        output_path = output.name
+        output.close()
+        script_file = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".ps1",
+            mode="w",
+            encoding="utf-8",
+        )
+        voice = self._settings.windows_sapi_voice or self._default_voice(target_language)
+        script = r"""
+param(
+  [Parameter(Mandatory=$true)][string]$Text,
+  [Parameter(Mandatory=$true)][string]$OutputPath,
+  [string]$VoiceName,
+  [int]$Rate
+)
+$ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Speech
+$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+try {
+  if ($VoiceName) {
+    try { $synth.SelectVoice($VoiceName) } catch {}
+  }
+  $synth.Rate = $Rate
+  $synth.SetOutputToWaveFile($OutputPath)
+  $synth.Speak($Text)
+} finally {
+  $synth.Dispose()
+}
+"""
+        script_file.write(script)
+        script_file.close()
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                script_file.name,
+                "-Text",
+                text,
+                "-OutputPath",
+                output_path,
+                "-VoiceName",
+                voice or "",
+                "-Rate",
+                str(self._settings.windows_sapi_rate),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self._settings.provider_timeout_seconds,
+            )
+            if process.returncode != 0:
+                detail = stderr.decode("utf-8", errors="replace") or stdout.decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                raise ProviderRequestError(f"Windows SAPI TTS failed: {detail[:1000]}")
+            with open(output_path, "rb") as handle:
+                audio_bytes = handle.read()
+            if not audio_bytes:
+                raise ProviderRequestError("Windows SAPI TTS produced empty audio")
+            return audio_bytes
+        finally:
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+            try:
+                os.remove(script_file.name)
+            except OSError:
+                pass
+
+    def _default_voice(self, target_language: str) -> str | None:
+        if target_language.lower().startswith("de"):
+            return "Microsoft Hedda Desktop"
+        return None
+
+
 def build_translation_provider(
     settings: Settings,
     client: httpx.AsyncClient,
@@ -493,4 +650,6 @@ def build_tts_provider(settings: Settings, client: httpx.AsyncClient) -> TTSProv
         return OpenAITTS(settings, client)
     if settings.tts_provider == "elevenlabs":
         return ElevenLabsTTS(settings, client)
+    if settings.tts_provider == "windows_sapi":
+        return WindowsSapiTTS(settings, client)
     raise ProviderConfigurationError(f"Unsupported TTS provider: {settings.tts_provider}")
