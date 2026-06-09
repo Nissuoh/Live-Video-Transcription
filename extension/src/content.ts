@@ -40,6 +40,7 @@
         captionTracks?: CaptionTrack[];
       };
     };
+    transcriptFallback?: YouTubeTranscriptFallback;
   }
 
   interface CaptionTrack {
@@ -51,6 +52,13 @@
     };
     kind?: string;
     vssId?: string;
+  }
+
+  interface YouTubeTranscriptFallback {
+    innertubeApiKey?: string;
+    innertubeContext?: Record<string, unknown>;
+    params?: string;
+    videoId?: string;
   }
 
   interface YouTubeTimedTextResponse {
@@ -324,13 +332,13 @@
       const sourceLanguage = runState.sourceLanguage;
       const targetLanguage = runState.targetLanguage;
       const tracks = chooseCaptionTracks(playerResponse, sourceLanguage);
-      if (tracks.length === 0) {
+      if (tracks.length === 0 && !hasInnertubeTranscriptFallback(playerResponse)) {
         showStatus(localizedMessage("captionsUnavailableError"), "error");
         return;
       }
       let transcript: TranscriptItem[];
       try {
-        transcript = await fetchTranscriptFromTracks(tracks);
+        transcript = await fetchTranscriptWithFallback(tracks, playerResponse);
       } catch (error: unknown) {
         if (isYouTubeAdShowing(video)) {
           showStatus(localizedMessage("adWaitingStatus"), "info");
@@ -788,6 +796,112 @@
     );
   }
 
+  async function fetchTranscriptWithFallback(
+    tracks: CaptionTrack[],
+    playerResponse: YouTubePlayerResponse,
+  ): Promise<TranscriptItem[]> {
+    let trackError: Error | null = null;
+    if (tracks.length > 0) {
+      try {
+        return await fetchTranscriptFromTracks(tracks);
+      } catch (error: unknown) {
+        trackError = normalizeError(error);
+      }
+    }
+
+    if (hasInnertubeTranscriptFallback(playerResponse)) {
+      try {
+        const transcript = await fetchInnertubeTranscript(playerResponse.transcriptFallback);
+        if (transcript.length > 0) {
+          return transcript;
+        }
+      } catch (error: unknown) {
+        const fallbackError = normalizeError(error);
+        if (trackError !== null) {
+          throw new Error(
+            `${trackError.message}; innertube transcript fallback failed: ${fallbackError.message}`,
+          );
+        }
+        throw fallbackError;
+      }
+    }
+
+    if (trackError !== null) {
+      throw trackError;
+    }
+    return [];
+  }
+
+  function hasInnertubeTranscriptFallback(
+    playerResponse: YouTubePlayerResponse,
+  ): playerResponse is YouTubePlayerResponse & { transcriptFallback: YouTubeTranscriptFallback } {
+    const fallback = playerResponse.transcriptFallback;
+    return (
+      fallback !== undefined &&
+      typeof fallback.innertubeApiKey === "string" &&
+      fallback.innertubeApiKey.length > 0 &&
+      isRecord(fallback.innertubeContext) &&
+      typeof fallback.params === "string" &&
+      fallback.params.length > 0
+    );
+  }
+
+  async function fetchInnertubeTranscript(
+    fallback: YouTubeTranscriptFallback,
+  ): Promise<TranscriptItem[]> {
+    const apiKey = fallback.innertubeApiKey;
+    const context = fallback.innertubeContext;
+    const params = fallback.params;
+    if (
+      typeof apiKey !== "string" ||
+      apiKey.length === 0 ||
+      !isRecord(context) ||
+      typeof params !== "string" ||
+      params.length === 0
+    ) {
+      throw new Error("YouTube transcript fallback metadata is incomplete");
+    }
+
+    const errors: string[] = [];
+    const endpoint = `/youtubei/v1/get_transcript?key=${encodeURIComponent(
+      apiKey,
+    )}&prettyPrint=false`;
+    const paramsCandidates = uniqueStrings([params, safeDecodeURIComponent(params)]);
+    for (const candidate of paramsCandidates) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            context,
+            params: candidate,
+            externalVideoId: fallback.videoId ?? resolvePageVideoId() ?? undefined,
+          }),
+        });
+        const body = await response.text();
+        if (!response.ok) {
+          errors.push(`HTTP ${response.status}: ${body.slice(0, 240)}`);
+          continue;
+        }
+        if (body.trim().length === 0) {
+          errors.push("empty response");
+          continue;
+        }
+        const transcript = parseInnertubeTranscript(JSON.parse(body));
+        if (transcript.length > 0) {
+          return transcript;
+        }
+        errors.push("response did not contain transcript segments");
+      } catch (error: unknown) {
+        errors.push(error instanceof Error ? error.message : "unknown error");
+      }
+    }
+    throw new Error(`YouTube transcript panel fallback failed: ${errors.join("; ")}`);
+  }
+
   async function fetchTranscript(track: CaptionTrack): Promise<TranscriptItem[]> {
     const errors: string[] = [];
     for (const format of ["json3", "srv3", "default", "vtt"] as const) {
@@ -987,6 +1101,128 @@
     return hours * 3600 + minutes * 60 + seconds;
   }
 
+  function parseInnertubeTranscript(value: unknown): TranscriptItem[] {
+    const fromSegments = findObjectsByKey(value, "transcriptSegmentRenderer")
+      .map(parseInnertubeSegment)
+      .filter((item): item is TranscriptItem => item !== null);
+    if (fromSegments.length > 0) {
+      return normalizeTranscriptDurations(fromSegments);
+    }
+
+    const fromCueGroups = findObjectsByKey(value, "transcriptCueGroupRenderer")
+      .map(parseInnertubeCueGroup)
+      .filter((item): item is TranscriptItem => item !== null);
+    return normalizeTranscriptDurations(fromCueGroups);
+  }
+
+  function parseInnertubeSegment(value: unknown): TranscriptItem | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+    const startMs = Number(value.startMs);
+    const endMs = Number(value.endMs);
+    const text = normalizeCaptionText(extractRunsText(value.snippet));
+    if (!Number.isFinite(startMs) || startMs < 0 || text.length === 0) {
+      return null;
+    }
+    const duration =
+      Number.isFinite(endMs) && endMs > startMs ? (endMs - startMs) / 1000 : 0;
+    return { start: startMs / 1000, duration, text };
+  }
+
+  function parseInnertubeCueGroup(value: unknown): TranscriptItem | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+    const start = parseTimestampText(extractRunsText(value.formattedStartOffset));
+    const cues = Array.isArray(value.cues) ? value.cues : [];
+    const text = normalizeCaptionText(
+      cues
+        .map((cue) => {
+          if (!isRecord(cue) || !isRecord(cue.transcriptCueRenderer)) {
+            return "";
+          }
+          return extractRunsText(cue.transcriptCueRenderer.cue);
+        })
+        .join(" "),
+    );
+    if (!Number.isFinite(start) || start < 0 || text.length === 0) {
+      return null;
+    }
+    return { start, duration: 0, text };
+  }
+
+  function normalizeTranscriptDurations(items: TranscriptItem[]): TranscriptItem[] {
+    const sorted = items
+      .filter((item) => item.text.length > 0 && Number.isFinite(item.start) && item.start >= 0)
+      .sort((left, right) => left.start - right.start);
+    return sorted.map((item, index) => {
+      const next = sorted[index + 1];
+      const inferredDuration =
+        next !== undefined ? Math.max(0.25, next.start - item.start) : 2;
+      return {
+        start: item.start,
+        duration: item.duration > 0 ? item.duration : inferredDuration,
+        text: item.text,
+      };
+    });
+  }
+
+  function findObjectsByKey(value: unknown, key: string): unknown[] {
+    const result: unknown[] = [];
+    const visit = (current: unknown): void => {
+      if (Array.isArray(current)) {
+        for (const item of current) {
+          visit(item);
+        }
+        return;
+      }
+      if (!isRecord(current)) {
+        return;
+      }
+      const matching = current[key];
+      if (matching !== undefined) {
+        result.push(matching);
+      }
+      for (const child of Object.values(current)) {
+        visit(child);
+      }
+    };
+    visit(value);
+    return result;
+  }
+
+  function extractRunsText(value: unknown): string {
+    if (!isRecord(value)) {
+      return "";
+    }
+    if (typeof value.simpleText === "string") {
+      return value.simpleText;
+    }
+    if (!Array.isArray(value.runs)) {
+      return "";
+    }
+    return value.runs
+      .map((run) => (isRecord(run) && typeof run.text === "string" ? run.text : ""))
+      .join("");
+  }
+
+  function parseTimestampText(value: string): number {
+    const parts = value.trim().split(":");
+    if (parts.length === 0 || parts.length > 3) {
+      return Number.NaN;
+    }
+    let seconds = 0;
+    for (const part of parts) {
+      const numeric = Number(part.replace(",", "."));
+      if (!Number.isFinite(numeric) || numeric < 0) {
+        return Number.NaN;
+      }
+      seconds = seconds * 60 + numeric;
+    }
+    return seconds;
+  }
+
   function normalizeCaptionText(text: string): string {
     return text.replace(/\s+/g, " ").trim();
   }
@@ -997,6 +1233,20 @@
         .map((track) => `${track.languageCode ?? "unknown"}/${track.kind ?? "manual"}`)
         .join(", ") || "none"
     );
+  }
+
+  function uniqueStrings(values: Array<string | null>): string[] {
+    return Array.from(
+      new Set(values.filter((value): value is string => value !== null && value.length > 0)),
+    );
+  }
+
+  function safeDecodeURIComponent(value: string): string | null {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return null;
+    }
   }
 
   function parseStreamChunk(value: unknown): StreamChunk {
@@ -1127,6 +1377,13 @@
       return `Live Video Translation: ${error.message}`;
     }
     return "Live Video Translation could not start on this YouTube page.";
+  }
+
+  function normalizeError(error: unknown): Error {
+    if (error instanceof Error) {
+      return error;
+    }
+    return new Error(typeof error === "string" ? error : "unknown error");
   }
 
   new YouTubeTranslationController().start();
