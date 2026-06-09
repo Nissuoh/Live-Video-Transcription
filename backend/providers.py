@@ -176,6 +176,21 @@ def _should_retry_openai_tts_with_legacy_model(response: httpx.Response, model: 
     )
 
 
+def _retry_delay_seconds(
+    response: httpx.Response | None,
+    settings: Settings,
+    attempt: int,
+) -> float:
+    if response is not None and response.status_code == 429:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            try:
+                return max(0.5, min(30.0, float(retry_after)))
+            except ValueError:
+                pass
+    return settings.provider_retry_base_delay_seconds * (2**attempt)
+
+
 async def _post_with_retries(
     provider: str,
     client: httpx.AsyncClient,
@@ -186,15 +201,18 @@ async def _post_with_retries(
     retry_statuses = {429, 500, 502, 503, 504}
     last_error: Exception | None = None
     for attempt in range(settings.provider_max_retries + 1):
+        retry_delay: float | None = None
         try:
             response = await client.post(url, **kwargs)
             if response.status_code not in retry_statuses or attempt >= settings.provider_max_retries:
                 return response
+            retry_delay = _retry_delay_seconds(response, settings, attempt)
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             last_error = exc
             if attempt >= settings.provider_max_retries:
                 raise ProviderRequestError(f"{provider} request failed: {exc}") from exc
-        await asyncio.sleep(settings.provider_retry_base_delay_seconds * (2**attempt))
+            retry_delay = _retry_delay_seconds(None, settings, attempt)
+        await asyncio.sleep(retry_delay)
     if last_error is not None:
         raise ProviderRequestError(f"{provider} request failed: {last_error}") from last_error
     raise ProviderRequestError(f"{provider} request failed after retries")

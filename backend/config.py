@@ -25,12 +25,12 @@ class Settings(BaseSettings):
     translation_provider: Literal["openai", "deepl", "openrouter"] = "openai"
     tts_provider: Literal["openai", "elevenlabs", "windows_sapi"] = "openai"
 
-    max_chunk_concurrency: int = Field(default=3, ge=1, le=16)
+    max_chunk_concurrency: int = Field(default=1, ge=1, le=16)
     max_transcript_items: int = Field(default=2000, ge=1, le=20000)
     max_text_chars_per_chunk: int = Field(default=4000, ge=1, le=20000)
     provider_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
-    provider_max_retries: int = Field(default=2, ge=0, le=5)
-    provider_retry_base_delay_seconds: float = Field(default=0.4, gt=0, le=10)
+    provider_max_retries: int = Field(default=4, ge=0, le=5)
+    provider_retry_base_delay_seconds: float = Field(default=1.0, gt=0, le=10)
     rate_limit_connections_per_minute: int = Field(default=30, ge=1, le=10000)
     rate_limit_chunks_per_minute: int = Field(default=3000, ge=1, le=100000)
 

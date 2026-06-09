@@ -87,6 +87,10 @@
   const LATE_TOLERANCE_SECONDS = 2;
   const STALE_CHUNK_SECONDS = 30;
   const TRANSCRIPT_LOOKBACK_SECONDS = 0.75;
+  const STREAM_LOOKAHEAD_SECONDS = 45;
+  const MERGED_TRANSCRIPT_TARGET_SECONDS = 7;
+  const MERGED_TRANSCRIPT_MAX_CHARS = 650;
+  const MERGED_TRANSCRIPT_MAX_ITEMS = 10;
   const INITIAL_AUDIO_BUFFER_SECONDS = 4;
   const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 8000;
   const AD_RETRY_DELAY_MS = 1000;
@@ -361,6 +365,7 @@
     private previousMuted: boolean | null = null;
     private navigationTimer: number | null = null;
     private adRetryTimer: number | null = null;
+    private streamRestartTimer: number | null = null;
     private bufferingWasPlaying = false;
     private bufferingStartedAt = 0;
     private translatedAudioReady = false;
@@ -382,6 +387,7 @@
         window.clearTimeout(this.navigationTimer);
       }
       this.clearAdRetry();
+      this.clearStreamRestart();
       this.navigationTimer = window.setTimeout(() => {
         this.navigationTimer = null;
         void this.bootstrap().catch((error: unknown) => {
@@ -484,6 +490,26 @@
       }
     }
 
+    private scheduleStreamRestart(): void {
+      const video = this.currentVideo;
+      if (video === null || video.ended) {
+        return;
+      }
+      this.clearStreamRestart();
+      this.streamRestartTimer = window.setTimeout(() => {
+        this.streamRestartTimer = null;
+        this.activeVideoId = null;
+        this.queueBootstrap();
+      }, 1000);
+    }
+
+    private clearStreamRestart(): void {
+      if (this.streamRestartTimer !== null) {
+        window.clearTimeout(this.streamRestartTimer);
+        this.streamRestartTimer = null;
+      }
+    }
+
     private openStream(
       videoId: string,
       transcript: TranscriptItem[],
@@ -527,7 +553,9 @@
           this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
           showStatus(formatStreamClosedStatus(message), "error");
+          return;
         }
+        this.scheduleStreamRestart();
         return;
       }
       if (message.type === "streamOpen") {
@@ -644,6 +672,7 @@
         this.scheduler.dispose();
         this.scheduler = null;
       }
+      this.clearStreamRestart();
       this.bufferingWasPlaying = false;
       this.bufferingStartedAt = 0;
       this.translatedAudioReady = false;
@@ -1927,7 +1956,53 @@
     currentTime: number,
   ): TranscriptItem[] {
     const minimumStart = Math.max(0, currentTime - TRANSCRIPT_LOOKBACK_SECONDS);
-    return transcript.filter((item) => item.start + item.duration >= minimumStart);
+    const maximumStart = currentTime + STREAM_LOOKAHEAD_SECONDS;
+    const windowItems = transcript.filter(
+      (item) => item.start + item.duration >= minimumStart && item.start <= maximumStart,
+    );
+    const merged: TranscriptItem[] = [];
+    let current: TranscriptItem | null = null;
+    for (const item of windowItems) {
+      const normalizedText = normalizeCaptionText(item.text);
+      if (normalizedText.length === 0) {
+        continue;
+      }
+      const candidate: TranscriptItem = {
+        start: item.start,
+        duration: item.duration,
+        text: normalizedText,
+      };
+      if (current === null) {
+        current = candidate;
+        continue;
+      }
+      const currentEnd: number = current.start + current.duration;
+      const candidateEnd: number = candidate.start + candidate.duration;
+      const gap: number = candidate.start - currentEnd;
+      const mergedDuration: number = Math.max(currentEnd, candidateEnd) - current.start;
+      const mergedText = `${current.text} ${candidate.text}`.trim();
+      if (
+        gap <= 1.25 &&
+        mergedDuration <= MERGED_TRANSCRIPT_TARGET_SECONDS &&
+        mergedText.length <= MERGED_TRANSCRIPT_MAX_CHARS
+      ) {
+        current = {
+          start: current.start,
+          duration: mergedDuration,
+          text: mergedText,
+        };
+        continue;
+      }
+      merged.push(current);
+      if (merged.length >= MERGED_TRANSCRIPT_MAX_ITEMS) {
+        return merged;
+      }
+      current = candidate;
+    }
+    if (current !== null && merged.length < MERGED_TRANSCRIPT_MAX_ITEMS) {
+      merged.push(current);
+    }
+    return merged;
   }
 
   function calculateAudioOffset(chunk: DecodedAudioChunk, currentTime: number): number {
