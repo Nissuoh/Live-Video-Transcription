@@ -73,11 +73,16 @@
   const SCHEDULE_AHEAD_SECONDS = 0.2;
   const LATE_TOLERANCE_SECONDS = 0.35;
   const STALE_CHUNK_SECONDS = 30;
+  const AD_RETRY_DELAY_MS = 1000;
+  const STATUS_COPY_RESET_MS = 1600;
   const STREAM_PORT_NAME = "translation-stream";
   const FALLBACK_MESSAGES: Record<string, string> = {
+    adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
     captionsEmptyError: "The selected caption track is empty.",
     captionsUnavailableError: "No caption track is available for the selected language.",
     connectionClosedError: "Live translation connection closed unexpectedly.",
+    copiedErrorButton: "Copied",
+    copyErrorButton: "Copy error",
     disabledStatus:
       "Live Video Translation is ready. Open the extension, enter your token, enable translation, and save.",
     metadataError: "Could not read the current YouTube video metadata.",
@@ -242,6 +247,7 @@
     private currentVideo: HTMLVideoElement | null = null;
     private previousMuted: boolean | null = null;
     private navigationTimer: number | null = null;
+    private adRetryTimer: number | null = null;
 
     start(): void {
       this.queueBootstrap();
@@ -259,6 +265,7 @@
       if (this.navigationTimer !== null) {
         window.clearTimeout(this.navigationTimer);
       }
+      this.clearAdRetry();
       this.navigationTimer = window.setTimeout(() => {
         this.navigationTimer = null;
         void this.bootstrap().catch((error: unknown) => {
@@ -282,6 +289,13 @@
       }
 
       const video = await waitForVideo();
+      if (isYouTubeAdShowing(video)) {
+        this.teardown();
+        showStatus(localizedMessage("adWaitingStatus"), "info");
+        this.scheduleAdRetry();
+        return;
+      }
+
       const playerResponse = await extractPlayerResponse();
       if (playerResponse === null) {
         this.teardown();
@@ -294,11 +308,17 @@
         showStatus(localizedMessage("videoIdError"), "error");
         return;
       }
+      const pageVideoId = resolvePageVideoId();
+      if (pageVideoId !== null && videoId !== pageVideoId) {
+        this.teardown();
+        showStatus(localizedMessage("adWaitingStatus"), "info");
+        this.scheduleAdRetry();
+        return;
+      }
       if (this.activeVideoId === videoId) {
         return;
       }
       this.teardown();
-      this.activeVideoId = videoId;
       this.currentVideo = video;
 
       const sourceLanguage = runState.sourceLanguage;
@@ -308,13 +328,39 @@
         showStatus(localizedMessage("captionsUnavailableError"), "error");
         return;
       }
-      const transcript = await fetchTranscriptFromTracks(tracks);
+      let transcript: TranscriptItem[];
+      try {
+        transcript = await fetchTranscriptFromTracks(tracks);
+      } catch (error: unknown) {
+        if (isYouTubeAdShowing(video)) {
+          showStatus(localizedMessage("adWaitingStatus"), "info");
+          this.scheduleAdRetry();
+          return;
+        }
+        throw error;
+      }
       if (transcript.length === 0) {
         showStatus(localizedMessage("captionsEmptyError"), "error");
         return;
       }
+      this.activeVideoId = videoId;
       this.scheduler = new AudioChunkScheduler(video);
       this.openStream(videoId, transcript, sourceLanguage, targetLanguage);
+    }
+
+    private scheduleAdRetry(): void {
+      this.clearAdRetry();
+      this.adRetryTimer = window.setTimeout(() => {
+        this.adRetryTimer = null;
+        this.queueBootstrap();
+      }, AD_RETRY_DELAY_MS);
+    }
+
+    private clearAdRetry(): void {
+      if (this.adRetryTimer !== null) {
+        window.clearTimeout(this.adRetryTimer);
+        this.adRetryTimer = null;
+      }
     }
 
     private openStream(
@@ -452,7 +498,9 @@
           pointer-events: none;
         }
         .status {
-          max-width: min(360px, calc(100vw - 32px));
+          max-width: min(420px, calc(100vw - 32px));
+          max-height: min(45vh, 360px);
+          overflow: auto;
           border: 1px solid #b8c1d1;
           border-radius: 6px;
           padding: 10px 12px;
@@ -460,22 +508,81 @@
           color: #172033;
           box-shadow: 0 10px 30px rgba(15, 23, 42, 0.2);
           font: 13px/1.4 Arial, sans-serif;
+          pointer-events: auto;
         }
         .status[data-kind="error"] {
           border-color: #f0b8b3;
           color: #8f1d17;
         }
+        .message {
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        .actions {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 10px;
+        }
+        .actions[hidden] {
+          display: none;
+        }
+        button {
+          appearance: none;
+          border: 1px solid #b8c1d1;
+          border-radius: 5px;
+          padding: 6px 9px;
+          background: #f8fafc;
+          color: #172033;
+          cursor: pointer;
+          font: 12px/1 Arial, sans-serif;
+        }
+        button:hover {
+          background: #eef2f7;
+        }
       `;
       const status = document.createElement("div");
       status.className = "status";
       status.id = "status";
+      const messageElement = document.createElement("div");
+      messageElement.className = "message";
+      messageElement.id = "status-message";
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      actions.id = "status-actions";
+      const copyButton = document.createElement("button");
+      copyButton.id = "copy-error";
+      copyButton.type = "button";
+      copyButton.addEventListener("click", () => {
+        void copyStatusReport(copyButton.dataset.report ?? messageElement.textContent ?? "").then(
+          () => {
+            copyButton.textContent = localizedMessage("copiedErrorButton");
+            window.setTimeout(() => {
+              copyButton.textContent = localizedMessage("copyErrorButton");
+            }, STATUS_COPY_RESET_MS);
+          },
+        );
+      });
+      actions.append(copyButton);
+      status.append(messageElement, actions);
       shadow.append(style, status);
       document.documentElement.append(host);
     }
     const shadowStatus = host.shadowRoot?.getElementById("status");
+    const shadowMessage = host.shadowRoot?.getElementById("status-message");
+    const shadowActions = host.shadowRoot?.getElementById("status-actions");
+    const shadowCopyButton = host.shadowRoot?.getElementById("copy-error");
     if (shadowStatus instanceof HTMLElement) {
       shadowStatus.dataset.kind = kind;
-      shadowStatus.textContent = message;
+    }
+    if (shadowMessage instanceof HTMLElement) {
+      shadowMessage.textContent = message;
+    }
+    if (shadowActions instanceof HTMLElement) {
+      shadowActions.hidden = kind !== "error";
+    }
+    if (shadowCopyButton instanceof HTMLButtonElement) {
+      shadowCopyButton.textContent = localizedMessage("copyErrorButton");
+      shadowCopyButton.dataset.report = buildStatusReport(message);
     }
   }
 
@@ -597,8 +704,17 @@
     if (typeof fromResponse === "string" && fromResponse.length > 0) {
       return fromResponse;
     }
+    return resolvePageVideoId();
+  }
+
+  function resolvePageVideoId(): string | null {
     const url = new URL(window.location.href);
-    return url.searchParams.get("v");
+    const watchVideoId = url.searchParams.get("v");
+    if (watchVideoId !== null && watchVideoId.length > 0) {
+      return watchVideoId;
+    }
+    const shortsMatch = /^\/shorts\/([^/?#]+)/.exec(url.pathname);
+    return shortsMatch?.[1] ?? null;
   }
 
   function chooseCaptionTracks(
@@ -665,7 +781,11 @@
         );
       }
     }
-    throw new Error(`Caption fetch failed for all tracks: ${errors.join(" | ")}`);
+    throw new Error(
+      `Caption fetch failed for all tracks (${summarizeCaptionTracks(tracks)}): ${errors.join(
+        " | ",
+      )}`,
+    );
   }
 
   async function fetchTranscript(track: CaptionTrack): Promise<TranscriptItem[]> {
@@ -871,6 +991,14 @@
     return text.replace(/\s+/g, " ").trim();
   }
 
+  function summarizeCaptionTracks(tracks: CaptionTrack[]): string {
+    return (
+      tracks
+        .map((track) => `${track.languageCode ?? "unknown"}/${track.kind ?? "manual"}`)
+        .join(", ") || "none"
+    );
+  }
+
   function parseStreamChunk(value: unknown): StreamChunk {
     if (!isRecord(value)) {
       throw new Error("Stream chunk must be a JSON object");
@@ -925,6 +1053,59 @@
       });
       observer.observe(document.documentElement, { childList: true, subtree: true });
     });
+  }
+
+  function isYouTubeAdShowing(video?: HTMLVideoElement): boolean {
+    const player = getMoviePlayerElement(video);
+    if (player === null) {
+      return false;
+    }
+    return (
+      player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting")
+    );
+  }
+
+  function getMoviePlayerElement(video?: HTMLVideoElement): HTMLElement | null {
+    const fromVideo = video?.closest("#movie_player");
+    if (fromVideo instanceof HTMLElement) {
+      return fromVideo;
+    }
+    const player = document.getElementById("movie_player");
+    return player instanceof HTMLElement ? player : null;
+  }
+
+  function buildStatusReport(message: string): string {
+    const video = document.querySelector("video");
+    const player = getMoviePlayerElement(video instanceof HTMLVideoElement ? video : undefined);
+    return [
+      "Live Video Translation diagnostic report",
+      `Time: ${new Date().toISOString()}`,
+      `URL: ${window.location.href}`,
+      `Page video ID: ${resolvePageVideoId() ?? "unknown"}`,
+      `Ad showing: ${isYouTubeAdShowing(video instanceof HTMLVideoElement ? video : undefined)}`,
+      `Player classes: ${player?.className.toString() ?? "unknown"}`,
+      `Message: ${message}`,
+    ].join("\n");
+  }
+
+  async function copyStatusReport(report: string): Promise<void> {
+    if (navigator.clipboard?.writeText !== undefined) {
+      try {
+        await navigator.clipboard.writeText(report);
+        return;
+      } catch {
+        // Fall back to the legacy copy path below.
+      }
+    }
+    const textArea = document.createElement("textarea");
+    textArea.value = report;
+    textArea.setAttribute("readonly", "true");
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    document.documentElement.append(textArea);
+    textArea.select();
+    document.execCommand("copy");
+    textArea.remove();
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {

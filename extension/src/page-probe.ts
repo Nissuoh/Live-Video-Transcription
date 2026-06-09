@@ -41,11 +41,6 @@
   });
 
   function readCurrentPlayerResponse(): PlayerResponseLike | null {
-    const globalResponse = readGlobalPlayerResponse();
-    if (globalResponse !== null) {
-      return globalResponse;
-    }
-
     const moviePlayer = document.getElementById("movie_player") as
       | (HTMLElement & { getPlayerResponse?: () => unknown })
       | null;
@@ -54,6 +49,11 @@
       if (isPlayerResponseLike(response)) {
         return response;
       }
+    }
+
+    const globalResponse = readGlobalPlayerResponse();
+    if (globalResponse !== null) {
+      return globalResponse;
     }
 
     return null;

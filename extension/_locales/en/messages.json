@@ -86,8 +86,17 @@
   "captionsEmptyError": {
     "message": "The selected caption track is empty."
   },
+  "adWaitingStatus": {
+    "message": "Waiting for the YouTube ad to finish before starting translation."
+  },
   "connectionClosedError": {
     "message": "Live translation connection closed unexpectedly."
+  },
+  "copyErrorButton": {
+    "message": "Copy error"
+  },
+  "copiedErrorButton": {
+    "message": "Copied"
   },
   "disabledStatus": {
     "message": "Live Video Translation is ready. Open the extension, enter your token, enable translation, and save."
