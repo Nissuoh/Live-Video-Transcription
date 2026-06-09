@@ -262,7 +262,8 @@
       this.navigationTimer = window.setTimeout(() => {
         this.navigationTimer = null;
         void this.bootstrap().catch((error: unknown) => {
-          console.error("[Live Video Translation]", error);
+          showStatus(formatErrorStatus(error), "error");
+          console.warn("[Live Video Translation]", error);
         });
       }, 500);
     };
@@ -739,6 +740,13 @@
       }
     }
     return FALLBACK_MESSAGES[key] ?? key;
+  }
+
+  function formatErrorStatus(error: unknown): string {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return `Live Video Translation: ${error.message}`;
+    }
+    return "Live Video Translation could not start on this YouTube page.";
   }
 
   new YouTubeTranslationController().start();
