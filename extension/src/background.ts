@@ -73,7 +73,8 @@ import {
     autoTranslationDisabledError: "Automatic translation is disabled.",
     backendUrlInvalidError: "Backend URL must use wss:// and point to /stream",
     invalidContentMessageError: "Invalid content script message",
-    missingTokenError: "Missing auth token. Open the extension options and save a token.",
+    missingTokenError:
+      "Missing backend access token. Open the extension options and save a token.",
     runtimeUnknownError: "Unknown runtime error",
     streamMessageUnsupportedError: "Unsupported content script message",
     unknownStreamError: "Unknown stream error",

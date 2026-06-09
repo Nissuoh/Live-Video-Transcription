@@ -30,7 +30,10 @@
     "message": "wss://example.com/stream"
   },
   "authTokenLabel": {
-    "message": "API/Auth-Token"
+    "message": "Backend-Zugangs-Token"
+  },
+  "authTokenPlaceholder": {
+    "message": "Token, den dein Backend akzeptiert"
   },
   "sourceLanguageLabel": {
     "message": "Von"
@@ -60,7 +63,7 @@
     "message": "Chrome-Erweiterungsspeicher ist in diesem Kontext nicht verfuegbar."
   },
   "tokenRequiredError": {
-    "message": "Auth-Token ist erforderlich, wenn automatische Uebersetzung aktiviert ist."
+    "message": "Backend-Zugangs-Token ist erforderlich, wenn automatische Uebersetzung aktiviert ist."
   },
   "settingsInvalidError": {
     "message": "Einstellungen sind ungueltig."
@@ -126,7 +129,7 @@
     "message": "Automatische Uebersetzung ist deaktiviert."
   },
   "missingTokenError": {
-    "message": "Auth-Token fehlt. Oeffne die Erweiterungsoptionen und speichere einen Token."
+    "message": "Backend-Zugangs-Token fehlt. Oeffne die Erweiterungsoptionen und speichere einen Token."
   },
   "backendUrlInvalidError": {
     "message": "Backend-URL muss wss:// oder lokal ws://localhost verwenden und auf /stream zeigen"

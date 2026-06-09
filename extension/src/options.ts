@@ -49,7 +49,8 @@ import {
     aiDisclosure:
       "Translated speech is AI-generated and sent through your configured backend.",
     appName: "Live Video Translation",
-    authTokenLabel: "API/Auth token",
+    authTokenLabel: "Backend access token",
+    authTokenPlaceholder: "Token issued by your backend",
     autoTranslateLabel: "Enable automatic translation on YouTube",
     automationSection: "Automation",
     backendStreamPathError: "Backend URL must point to /stream.",
@@ -70,7 +71,7 @@ import {
     sourceLanguageLabel: "From",
     storageUnavailableError: "Chrome extension storage is unavailable in this context.",
     targetLanguageLabel: "To",
-    tokenRequiredError: "Auth token is required when automatic translation is enabled.",
+    tokenRequiredError: "Backend access token is required when automatic translation is enabled.",
   };
 
   const form = requireElement("#options-form", HTMLFormElement);

@@ -1783,7 +1783,11 @@
       typeof message.reason === "string" && message.reason.trim().length > 0
         ? message.reason.trim()
         : "No close reason provided";
-    return `${localizedMessage("connectionClosedError")} Code: ${code}. Reason: ${reason}.`;
+    const hint =
+      code === 1008 && /invalid auth token/i.test(reason)
+        ? " Check that the extension backend access token matches AUTH_TOKENS in your backend."
+        : "";
+    return `${localizedMessage("connectionClosedError")} Code: ${code}. Reason: ${reason}.${hint}`;
   }
 
   function normalizeError(error: unknown): Error {

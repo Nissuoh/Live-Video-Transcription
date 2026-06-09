@@ -30,7 +30,10 @@
     "message": "wss://example.com/stream"
   },
   "authTokenLabel": {
-    "message": "API/Auth token"
+    "message": "Backend access token"
+  },
+  "authTokenPlaceholder": {
+    "message": "Token issued by your backend"
   },
   "sourceLanguageLabel": {
     "message": "From"
@@ -60,7 +63,7 @@
     "message": "Chrome extension storage is unavailable in this context."
   },
   "tokenRequiredError": {
-    "message": "Auth token is required when automatic translation is enabled."
+    "message": "Backend access token is required when automatic translation is enabled."
   },
   "settingsInvalidError": {
     "message": "Settings are invalid."
@@ -126,7 +129,7 @@
     "message": "Automatic translation is disabled."
   },
   "missingTokenError": {
-    "message": "Missing auth token. Open the extension options and save a token."
+    "message": "Missing backend access token. Open the extension options and save a token."
   },
   "backendUrlInvalidError": {
     "message": "Backend URL must use wss:// or local ws://localhost and point to /stream"
