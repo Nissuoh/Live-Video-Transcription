@@ -87,10 +87,13 @@
   const LATE_TOLERANCE_SECONDS = 2;
   const STALE_CHUNK_SECONDS = 30;
   const TRANSCRIPT_LOOKBACK_SECONDS = 0.75;
-  const STREAM_LOOKAHEAD_SECONDS = 45;
-  const MERGED_TRANSCRIPT_TARGET_SECONDS = 7;
-  const MERGED_TRANSCRIPT_MAX_CHARS = 650;
-  const MERGED_TRANSCRIPT_MAX_ITEMS = 10;
+  const STREAM_LOOKAHEAD_SECONDS = 18;
+  const STREAM_REFRESH_MARGIN_SECONDS = 6;
+  const STREAM_RESTART_MIN_DELAY_MS = 5000;
+  const STREAM_RESTART_MAX_DELAY_MS = 30000;
+  const MERGED_TRANSCRIPT_TARGET_SECONDS = 8;
+  const MERGED_TRANSCRIPT_MAX_CHARS = 900;
+  const MERGED_TRANSCRIPT_MAX_ITEMS = 3;
   const INITIAL_AUDIO_BUFFER_SECONDS = 4;
   const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 8000;
   const AD_RETRY_DELAY_MS = 1000;
@@ -366,6 +369,7 @@
     private navigationTimer: number | null = null;
     private adRetryTimer: number | null = null;
     private streamRestartTimer: number | null = null;
+    private streamWindowEnd: number | null = null;
     private bufferingWasPlaying = false;
     private bufferingStartedAt = 0;
     private translatedAudioReady = false;
@@ -470,6 +474,7 @@
         showStatus(localizedMessage("captionsEmptyError"), "error");
         return;
       }
+      this.streamWindowEnd = transcriptWindowEnd(playbackTranscript);
       this.activeVideoId = videoId;
       this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
       this.openStream(videoId, playbackTranscript, sourceLanguage, targetLanguage);
@@ -492,15 +497,36 @@
 
     private scheduleStreamRestart(): void {
       const video = this.currentVideo;
-      if (video === null || video.ended) {
+      const windowEnd = this.streamWindowEnd;
+      if (video === null || video.ended || windowEnd === null) {
         return;
       }
       this.clearStreamRestart();
+      if (video.paused) {
+        this.streamRestartTimer = window.setTimeout(() => {
+          this.streamRestartTimer = null;
+          this.scheduleStreamRestart();
+        }, STREAM_RESTART_MIN_DELAY_MS);
+        return;
+      }
+      const secondsUntilRefresh = windowEnd - video.currentTime - STREAM_REFRESH_MARGIN_SECONDS;
+      const delayMs = Math.max(
+        STREAM_RESTART_MIN_DELAY_MS,
+        Math.min(STREAM_RESTART_MAX_DELAY_MS, secondsUntilRefresh * 1000),
+      );
       this.streamRestartTimer = window.setTimeout(() => {
         this.streamRestartTimer = null;
+        if (
+          this.currentVideo !== null &&
+          this.streamWindowEnd !== null &&
+          this.streamWindowEnd - this.currentVideo.currentTime > STREAM_REFRESH_MARGIN_SECONDS
+        ) {
+          this.scheduleStreamRestart();
+          return;
+        }
         this.activeVideoId = null;
         this.queueBootstrap();
-      }, 1000);
+      }, delayMs);
     }
 
     private clearStreamRestart(): void {
@@ -676,6 +702,7 @@
       this.bufferingWasPlaying = false;
       this.bufferingStartedAt = 0;
       this.translatedAudioReady = false;
+      this.streamWindowEnd = null;
       this.restoreMutedState();
       this.currentVideo = null;
     }
@@ -2003,6 +2030,13 @@
       merged.push(current);
     }
     return merged;
+  }
+
+  function transcriptWindowEnd(transcript: TranscriptItem[]): number {
+    return transcript.reduce(
+      (latestEnd, item) => Math.max(latestEnd, item.start + item.duration),
+      0,
+    );
   }
 
   function calculateAudioOffset(chunk: DecodedAudioChunk, currentTime: number): number {
