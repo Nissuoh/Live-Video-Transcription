@@ -98,6 +98,8 @@
     adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
     audioBlockedStatus:
       "Click Enable audio once so Chrome can allow translated speech on this YouTube tab.",
+    audioReadyStatus:
+      "Translated audio is active. If you cannot hear it, click Test audio.",
     captionsEmptyError: "The selected caption track is empty.",
     captionsUnavailableError: "No caption track is available for the selected language.",
     connectionClosedError: "Live translation connection closed unexpectedly.",
@@ -110,6 +112,7 @@
     notConfiguredStatus:
       "Live translation is enabled but not configured. Open the extension popup.",
     preparingAudioStatus: "Live translation is preparing audio.",
+    testAudioButton: "Test audio",
     videoIdError: "Could not identify the current YouTube video.",
   };
 
@@ -150,6 +153,34 @@
       await context.resume();
       this.notifyAudioState();
       this.startLoop();
+      return context.state;
+    }
+
+    async playTestTone(): Promise<AudioContextState> {
+      const context = this.getAudioContext();
+      await context.resume();
+      const gainNode = this.gainNode;
+      if (gainNode === null) {
+        return context.state;
+      }
+      const oscillator = context.createOscillator();
+      const toneGain = context.createGain();
+      const startAt = context.currentTime + 0.03;
+      const stopAt = startAt + 0.45;
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+      toneGain.gain.setValueAtTime(0.0001, startAt);
+      toneGain.gain.exponentialRampToValueAtTime(0.25, startAt + 0.04);
+      toneGain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+      oscillator.connect(toneGain);
+      toneGain.connect(gainNode);
+      oscillator.start(startAt);
+      oscillator.stop(stopAt + 0.03);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        toneGain.disconnect();
+      };
+      this.notifyAudioState();
       return context.state;
     }
 
@@ -517,7 +548,7 @@
       this.translatedAudioReady = true;
       if (this.canResumeBufferedPlayback()) {
         this.resumeAfterBuffering();
-        hideStatus();
+        this.showAudioReadyStatus();
         return;
       }
       if (!scheduler.isAudioRunning()) {
@@ -530,7 +561,11 @@
     private readonly onAudioStateChanged = (state: AudioContextState): void => {
       if (state === "running" && this.canResumeBufferedPlayback()) {
         this.resumeAfterBuffering();
-        hideStatus();
+        this.showAudioReadyStatus();
+        return;
+      }
+      if (state === "running") {
+        this.showBufferingStatus();
         return;
       }
       if (this.scheduler !== null) {
@@ -551,7 +586,7 @@
             const state = await scheduler.unlockAudio();
             if (state === "running" && this.canResumeBufferedPlayback()) {
               this.resumeAfterBuffering();
-              hideStatus();
+              this.showAudioReadyStatus();
               return;
             }
             if (state !== "running") {
@@ -561,6 +596,7 @@
             this.showBufferingStatus();
           },
         },
+        this.createTestAudioAction(scheduler),
       ]);
     }
 
@@ -574,7 +610,27 @@
       showStatus(
         `${localizedMessage("preparingAudioStatus")} Buffer: ${bufferedAhead.toFixed(1)}s, chunks: ${scheduler.getBufferedChunkCount()}.`,
         "info",
+        [this.createTestAudioAction(scheduler)],
       );
+    }
+
+    private showAudioReadyStatus(): void {
+      const scheduler = this.scheduler;
+      if (scheduler === null) {
+        return;
+      }
+      showStatus(localizedMessage("audioReadyStatus"), "info", [
+        this.createTestAudioAction(scheduler),
+      ]);
+    }
+
+    private createTestAudioAction(scheduler: AudioChunkScheduler): StatusAction {
+      return {
+        label: localizedMessage("testAudioButton"),
+        onClick: async () => {
+          await scheduler.playTestTone();
+        },
+      };
     }
 
     private teardown(): void {

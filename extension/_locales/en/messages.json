@@ -101,8 +101,14 @@
   "audioBlockedStatus": {
     "message": "Click Enable audio once so Chrome can allow translated speech on this YouTube tab."
   },
+  "audioReadyStatus": {
+    "message": "Translated audio is active. If you cannot hear it, click Test audio."
+  },
   "enableAudioButton": {
     "message": "Enable audio"
+  },
+  "testAudioButton": {
+    "message": "Test audio"
   },
   "connectionClosedError": {
     "message": "Live translation connection closed unexpectedly."

@@ -101,8 +101,14 @@
   "audioBlockedStatus": {
     "message": "Klicke einmal auf Audio aktivieren, damit Chrome die uebersetzte Sprache in diesem YouTube-Tab erlauben kann."
   },
+  "audioReadyStatus": {
+    "message": "Uebersetztes Audio ist aktiv. Wenn du nichts hoerst, klicke auf Ton testen."
+  },
   "enableAudioButton": {
     "message": "Audio aktivieren"
+  },
+  "testAudioButton": {
+    "message": "Ton testen"
   },
   "connectionClosedError": {
     "message": "Live-Uebersetzungsverbindung wurde unerwartet geschlossen."
