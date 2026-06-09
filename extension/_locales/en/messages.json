@@ -98,6 +98,12 @@
   "adWaitingStatus": {
     "message": "Waiting for the YouTube ad to finish before starting translation."
   },
+  "audioBlockedStatus": {
+    "message": "Click Enable audio once so Chrome can allow translated speech on this YouTube tab."
+  },
+  "enableAudioButton": {
+    "message": "Enable audio"
+  },
   "connectionClosedError": {
     "message": "Live translation connection closed unexpectedly."
   },

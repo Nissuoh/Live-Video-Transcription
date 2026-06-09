@@ -78,6 +78,11 @@
     buffer: AudioBuffer;
   }
 
+  interface StatusAction {
+    label: string;
+    onClick: () => void | Promise<void>;
+  }
+
   const SCHEDULE_AHEAD_SECONDS = 0.2;
   const LATE_TOLERANCE_SECONDS = 0.35;
   const STALE_CHUNK_SECONDS = 30;
@@ -88,6 +93,8 @@
   const STREAM_PORT_NAME = "translation-stream";
   const FALLBACK_MESSAGES: Record<string, string> = {
     adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
+    audioBlockedStatus:
+      "Click Enable audio once so Chrome can allow translated speech on this YouTube tab.",
     captionsEmptyError: "The selected caption track is empty.",
     captionsUnavailableError: "No caption track is available for the selected language.",
     connectionClosedError: "Live translation connection closed unexpectedly.",
@@ -95,6 +102,7 @@
     copyErrorButton: "Copy error",
     disabledStatus:
       "Live Video Translation is ready. Open the extension, enter your token, enable translation, and save.",
+    enableAudioButton: "Enable audio",
     metadataError: "Could not read the current YouTube video metadata.",
     notConfiguredStatus:
       "Live translation is enabled but not configured. Open the extension popup.",
@@ -104,6 +112,7 @@
 
   class AudioChunkScheduler {
     private readonly video: HTMLVideoElement;
+    private readonly onAudioStateChanged: (state: AudioContextState) => void;
     private readonly chunks = new Map<number, DecodedAudioChunk>();
     private readonly scheduledKeys = new Set<number>();
     private readonly activeSources = new Map<AudioBufferSourceNode, number>();
@@ -111,8 +120,9 @@
     private gainNode: GainNode | null = null;
     private animationFrameId: number | null = null;
 
-    constructor(video: HTMLVideoElement) {
+    constructor(video: HTMLVideoElement, onAudioStateChanged: (state: AudioContextState) => void) {
       this.video = video;
+      this.onAudioStateChanged = onAudioStateChanged;
       this.video.addEventListener("play", this.onPlaybackResumed);
       this.video.addEventListener("pause", this.onPlaybackInterrupted);
       this.video.addEventListener("seeking", this.onPlaybackInterrupted);
@@ -132,6 +142,22 @@
       this.startLoop();
     }
 
+    async unlockAudio(): Promise<AudioContextState> {
+      const context = this.getAudioContext();
+      await context.resume();
+      this.notifyAudioState();
+      this.startLoop();
+      return context.state;
+    }
+
+    isAudioRunning(): boolean {
+      return this.audioContext?.state === "running";
+    }
+
+    getAudioState(): AudioContextState | "not-created" {
+      return this.audioContext?.state ?? "not-created";
+    }
+
     dispose(): void {
       if (this.animationFrameId !== null) {
         window.cancelAnimationFrame(this.animationFrameId);
@@ -147,7 +173,10 @@
     }
 
     private readonly onPlaybackResumed = (): void => {
-      void this.getAudioContext().resume();
+      void this.unlockAudio().catch((error: unknown) => {
+        console.warn("[Live Video Translation] AudioContext resume failed", error);
+        this.notifyAudioState();
+      });
       this.startLoop();
     };
 
@@ -165,11 +194,21 @@
     private getAudioContext(): AudioContext {
       if (this.audioContext === null) {
         this.audioContext = new AudioContext();
+        this.audioContext.addEventListener("statechange", () => {
+          this.notifyAudioState();
+        });
         this.gainNode = this.audioContext.createGain();
         this.gainNode.gain.value = 1;
         this.gainNode.connect(this.audioContext.destination);
+        this.notifyAudioState();
       }
       return this.audioContext;
+    }
+
+    private notifyAudioState(): void {
+      if (this.audioContext !== null) {
+        this.onAudioStateChanged(this.audioContext.state);
+      }
     }
 
     private startLoop(): void {
@@ -218,7 +257,10 @@
       if (gainNode === null) {
         return;
       }
-      void context.resume();
+      void this.unlockAudio().catch((error: unknown) => {
+        console.warn("[Live Video Translation] AudioContext resume failed", error);
+        this.notifyAudioState();
+      });
       const source = context.createBufferSource();
       source.buffer = chunk.buffer;
       source.playbackRate.value = Math.max(
@@ -354,7 +396,7 @@
         return;
       }
       this.activeVideoId = videoId;
-      this.scheduler = new AudioChunkScheduler(video);
+      this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
       this.openStream(videoId, transcript, sourceLanguage, targetLanguage);
     }
 
@@ -431,7 +473,42 @@
       }
       const chunk = parseStreamChunk(message.chunk);
       await scheduler.addChunk(chunk);
-      hideStatus();
+      if (scheduler.isAudioRunning()) {
+        hideStatus();
+        return;
+      }
+      this.showAudioUnlockStatus();
+    }
+
+    private readonly onAudioStateChanged = (state: AudioContextState): void => {
+      if (state === "running") {
+        hideStatus();
+        return;
+      }
+      if (this.scheduler !== null) {
+        this.showAudioUnlockStatus();
+      }
+    };
+
+    private showAudioUnlockStatus(): void {
+      const scheduler = this.scheduler;
+      if (scheduler === null) {
+        return;
+      }
+      const message = `${localizedMessage("audioBlockedStatus")} AudioContext: ${scheduler.getAudioState()}.`;
+      showStatus(message, "info", [
+        {
+          label: localizedMessage("enableAudioButton"),
+          onClick: async () => {
+            const state = await scheduler.unlockAudio();
+            if (state === "running") {
+              hideStatus();
+              return;
+            }
+            this.showAudioUnlockStatus();
+          },
+        },
+      ]);
     }
 
     private teardown(): void {
@@ -492,7 +569,7 @@
     }
   }
 
-  function showStatus(message: string, kind: "info" | "error"): void {
+  function showStatus(message: string, kind: "info" | "error", actions: StatusAction[] = []): void {
     let host = document.getElementById("lvt-status-host");
     if (host === null) {
       host = document.createElement("div");
@@ -531,6 +608,7 @@
         .actions {
           display: flex;
           justify-content: flex-end;
+          gap: 8px;
           margin-top: 10px;
         }
         .actions[hidden] {
@@ -559,20 +637,6 @@
       const actions = document.createElement("div");
       actions.className = "actions";
       actions.id = "status-actions";
-      const copyButton = document.createElement("button");
-      copyButton.id = "copy-error";
-      copyButton.type = "button";
-      copyButton.addEventListener("click", () => {
-        void copyStatusReport(copyButton.dataset.report ?? messageElement.textContent ?? "").then(
-          () => {
-            copyButton.textContent = localizedMessage("copiedErrorButton");
-            window.setTimeout(() => {
-              copyButton.textContent = localizedMessage("copyErrorButton");
-            }, STATUS_COPY_RESET_MS);
-          },
-        );
-      });
-      actions.append(copyButton);
       status.append(messageElement, actions);
       shadow.append(style, status);
       document.documentElement.append(host);
@@ -580,7 +644,6 @@
     const shadowStatus = host.shadowRoot?.getElementById("status");
     const shadowMessage = host.shadowRoot?.getElementById("status-message");
     const shadowActions = host.shadowRoot?.getElementById("status-actions");
-    const shadowCopyButton = host.shadowRoot?.getElementById("copy-error");
     if (shadowStatus instanceof HTMLElement) {
       shadowStatus.dataset.kind = kind;
     }
@@ -588,12 +651,43 @@
       shadowMessage.textContent = message;
     }
     if (shadowActions instanceof HTMLElement) {
-      shadowActions.hidden = kind !== "error";
+      shadowActions.replaceChildren();
+      if (kind === "error") {
+        shadowActions.append(createCopyReportButton(message));
+      }
+      for (const action of actions) {
+        shadowActions.append(createStatusActionButton(action));
+      }
+      shadowActions.hidden = kind !== "error" && actions.length === 0;
     }
-    if (shadowCopyButton instanceof HTMLButtonElement) {
-      shadowCopyButton.textContent = localizedMessage("copyErrorButton");
-      shadowCopyButton.dataset.report = buildStatusReport(message);
-    }
+  }
+
+  function createCopyReportButton(message: string): HTMLButtonElement {
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.textContent = localizedMessage("copyErrorButton");
+    const report = buildStatusReport(message);
+    copyButton.addEventListener("click", () => {
+      void copyStatusReport(report).then(() => {
+        copyButton.textContent = localizedMessage("copiedErrorButton");
+        window.setTimeout(() => {
+          copyButton.textContent = localizedMessage("copyErrorButton");
+        }, STATUS_COPY_RESET_MS);
+      });
+    });
+    return copyButton;
+  }
+
+  function createStatusActionButton(action: StatusAction): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      void Promise.resolve(action.onClick()).catch((error: unknown) => {
+        showStatus(formatErrorStatus(error), "error");
+      });
+    });
+    return button;
   }
 
   function hideStatus(): void {
@@ -1722,10 +1816,21 @@
       `URL: ${window.location.href}`,
       `Page video ID: ${resolvePageVideoId() ?? "unknown"}`,
       `Ad showing: ${isYouTubeAdShowing(video instanceof HTMLVideoElement ? video : undefined)}`,
+      `Video muted: ${video instanceof HTMLVideoElement ? video.muted : "unknown"}`,
+      `Video volume: ${video instanceof HTMLVideoElement ? video.volume : "unknown"}`,
+      `User activation: ${describeUserActivation()}`,
       `Transcript fallback metadata: ${describeTranscriptFallbackMetadata()}`,
       `Player classes: ${player?.className.toString() ?? "unknown"}`,
       `Message: ${message}`,
     ].join("\n");
+  }
+
+  function describeUserActivation(): string {
+    const activation = navigator.userActivation;
+    if (activation === undefined) {
+      return "unavailable";
+    }
+    return `active=${activation.isActive}, hasBeenActive=${activation.hasBeenActive}`;
   }
 
   function describeTranscriptFallbackMetadata(): string {

@@ -98,6 +98,12 @@
   "adWaitingStatus": {
     "message": "Warte, bis die YouTube-Werbung beendet ist, bevor die Uebersetzung startet."
   },
+  "audioBlockedStatus": {
+    "message": "Klicke einmal auf Audio aktivieren, damit Chrome die uebersetzte Sprache in diesem YouTube-Tab erlauben kann."
+  },
+  "enableAudioButton": {
+    "message": "Audio aktivieren"
+  },
   "connectionClosedError": {
     "message": "Live-Uebersetzungsverbindung wurde unerwartet geschlossen."
   },
