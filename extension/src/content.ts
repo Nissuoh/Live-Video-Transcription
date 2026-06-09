@@ -34,6 +34,7 @@
     voiceGender?: string;
     voicePitch?: string;
     preserveVoicePitch?: boolean;
+    uiLanguage?: string;
     error?: string;
   }
 
@@ -45,6 +46,7 @@
     voiceGender: VoiceGender;
     voicePitch: VoicePitch;
     preserveVoicePitch: boolean;
+    uiLanguage: string;
   }
 
   type VoiceGender = "male" | "female";
@@ -130,6 +132,8 @@
   const TRANSCRIPT_PANEL_POLL_MS = 250;
   const PITCH_PRESERVE_RATE_EPSILON = 0.02;
   const STREAM_PORT_NAME = "translation-stream";
+  let activeUiLanguage = "system";
+  let activeMessages: Record<string, string> = {};
   const FALLBACK_MESSAGES: Record<string, string> = {
     adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
     audioBlockedStatus:
@@ -584,6 +588,7 @@
 
     private async bootstrap(): Promise<void> {
       const runState = await getRunState();
+      await configureContentLocale(runState.uiLanguage);
       if (!runState.enabled) {
         this.teardown();
         showStatus(localizedMessage("disabledStatus"), "info");
@@ -1079,6 +1084,7 @@
         voiceGender: parseVoiceGender(response.voiceGender),
         voicePitch: parseVoicePitch(response.voicePitch),
         preserveVoicePitch: response.preserveVoicePitch !== false,
+        uiLanguage: typeof response.uiLanguage === "string" ? response.uiLanguage : "system",
       };
     } catch {
       return defaultRunState();
@@ -1094,6 +1100,7 @@
       voiceGender: "male",
       voicePitch: "normal",
       preserveVoicePitch: true,
+      uiLanguage: "system",
     };
   }
 
@@ -1185,6 +1192,7 @@
     const shadowActions = host.shadowRoot?.getElementById("status-actions");
     if (shadowStatus instanceof HTMLElement) {
       shadowStatus.dataset.kind = kind;
+      shadowStatus.dir = isRtlLocale(getEffectiveUiLocale()) ? "rtl" : "ltr";
     }
     if (shadowMessage instanceof HTMLElement) {
       shadowMessage.textContent = message;
@@ -2537,6 +2545,10 @@
   }
 
   function localizedMessage(key: string): string {
+    const configured = activeMessages[key];
+    if (configured !== undefined && configured.trim().length > 0) {
+      return configured;
+    }
     if (typeof chrome !== "undefined" && chrome.i18n?.getMessage !== undefined) {
       const localized = chrome.i18n.getMessage(key);
       if (localized.trim().length > 0) {
@@ -2544,6 +2556,72 @@
       }
     }
     return FALLBACK_MESSAGES[key] ?? key;
+  }
+
+  async function configureContentLocale(uiLanguage: string): Promise<void> {
+    const normalized = normalizeLocale(uiLanguage === "system" ? getBrowserLocale() : uiLanguage);
+    if (normalized === activeUiLanguage && Object.keys(activeMessages).length > 0) {
+      return;
+    }
+    activeUiLanguage = normalized;
+    activeMessages = {
+      ...(await loadLocaleMessages("en")),
+      ...(normalized === "en" ? {} : await loadLocaleMessages(normalized)),
+    };
+  }
+
+  async function loadLocaleMessages(locale: string): Promise<Record<string, string>> {
+    if (typeof chrome === "undefined" || chrome.runtime?.getURL === undefined) {
+      return {};
+    }
+    try {
+      const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/messages.json`));
+      if (!response.ok) {
+        return {};
+      }
+      const raw = (await response.json()) as Record<string, { message?: string }>;
+      const messages: Record<string, string> = {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value.message === "string") {
+          messages[key] = value.message;
+        }
+      }
+      return messages;
+    } catch {
+      return {};
+    }
+  }
+
+  function getEffectiveUiLocale(): string {
+    return activeUiLanguage === "system" ? normalizeLocale(getBrowserLocale()) : activeUiLanguage;
+  }
+
+  function getBrowserLocale(): string {
+    if (typeof chrome !== "undefined" && chrome.i18n?.getUILanguage !== undefined) {
+      return chrome.i18n.getUILanguage();
+    }
+    return navigator.languages[0] ?? navigator.language ?? "en";
+  }
+
+  function normalizeLocale(locale: string): string {
+    const normalized = locale.trim().toLowerCase().replace("-", "_");
+    if (normalized.startsWith("de")) return "de";
+    if (normalized.startsWith("fr")) return "fr";
+    if (normalized.startsWith("es")) return "es";
+    if (normalized.startsWith("pt")) return "pt_BR";
+    if (normalized.startsWith("zh")) return "zh_CN";
+    if (normalized.startsWith("ja")) return "ja";
+    if (normalized.startsWith("ko")) return "ko";
+    if (normalized.startsWith("ar")) return "ar";
+    if (normalized.startsWith("hi")) return "hi";
+    if (normalized.startsWith("tr")) return "tr";
+    if (normalized.startsWith("pl")) return "pl";
+    if (normalized.startsWith("it")) return "it";
+    return "en";
+  }
+
+  function isRtlLocale(locale: string): boolean {
+    return locale.toLowerCase().startsWith("ar");
   }
 
   function formatErrorStatus(error: unknown): string {

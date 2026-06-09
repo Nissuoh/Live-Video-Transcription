@@ -85,11 +85,22 @@ The default local quality recommendation is `TTS_PROVIDER=edge_tts` because it g
 
 The extension stores stable language codes such as `en` and `de`. It does not store translated display labels for source and target languages.
 
-The popup and options UI store `uiLanguage` separately from source and target language. Current shipped UI languages are browser default, English, German, and French. Source and target language names are rendered through `Intl.DisplayNames` in the selected interface language where Chrome supports it.
+The popup, options UI, and YouTube status overlay store `uiLanguage` separately from source and target language. Current shipped UI languages are browser default, English, German, French, Spanish, Portuguese (Brazil), Chinese (Simplified), Japanese, Korean, Arabic, Hindi, Turkish, Polish, and Italian. Source and target language names are rendered through `Intl.DisplayNames` in the selected interface language where Chrome supports it.
 
 ## Playback Speed And Pitch
 
 YouTube playback speed and translated speech speed stay synchronized. With `preserveVoicePitch=true`, the content script uses Chrome's native pitch-preserving media playback for sped-up translated chunks. This keeps a low or male voice from becoming artificially high or robotic at 1.25x, 1.5x, or 2x playback speed.
+
+## Gemini 3.5 Live Translate Evaluation
+
+Google documents `gemini-3.5-live-translate-preview` as a low-latency audio-to-audio Live API translation model with 70+ supported languages. It is relevant for a V2 architecture, but it is not compatible with the current V1 contract as a simple provider swap:
+
+- V1 sends YouTube captions as text plus timestamps.
+- Gemini 3.5 Live Translate accepts audio input only for translation.
+- V1 needs exact caption timestamp alignment for YouTube playback.
+- Live Translate is optimized for continuous speech-to-speech sessions and has preview limitations around voice consistency, language detection, background audio, and echo behavior.
+
+Recommended path: keep V1 transcript-based for Chrome Web Store stability, then add a separate V2 backend stream mode for audio-to-audio translation after validating browser audio capture, YouTube policy constraints, server-side authentication, latency, and cost.
 
 ## Production Shape
 

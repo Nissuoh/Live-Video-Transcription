@@ -24,6 +24,7 @@ This document tracks non-code work that must be completed before submitting the 
   - Explain that no video URL is entered in the extension; the current tab is detected automatically.
   - Explain that the default language flow is English captions to German speech.
   - Explain that the extension UI language can be selected in the popup/options UI.
+  - Shipped UI languages: browser default, English, German, French, Spanish, Portuguese (Brazil), Chinese (Simplified), Japanese, Korean, Arabic, Hindi, Turkish, Polish, and Italian.
 
 ## Privacy Fields
 

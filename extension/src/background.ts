@@ -62,7 +62,21 @@ import {
     preserveVoicePitch?: boolean;
   }
 
-  type UiLanguage = "system" | "en" | "de" | "fr";
+  type UiLanguage =
+    | "system"
+    | "en"
+    | "de"
+    | "fr"
+    | "es"
+    | "pt_BR"
+    | "zh_CN"
+    | "ja"
+    | "ko"
+    | "ar"
+    | "hi"
+    | "tr"
+    | "pl"
+    | "it";
   type VoiceGender = "male" | "female";
   type VoicePitch = "normal" | "high" | "low";
 
@@ -83,6 +97,22 @@ import {
     "voicePitch",
     "preserveVoicePitch",
   ] as const;
+  const SUPPORTED_UI_LANGUAGES: readonly UiLanguage[] = [
+    "system",
+    "en",
+    "de",
+    "fr",
+    "es",
+    "pt_BR",
+    "zh_CN",
+    "ja",
+    "ko",
+    "ar",
+    "hi",
+    "tr",
+    "pl",
+    "it",
+  ];
   const STREAM_PORT_NAME = "translation-stream";
   const KEEPALIVE_INTERVAL_MS = 20_000;
   const MAX_TRANSCRIPT_ITEMS = 2000;
@@ -453,7 +483,9 @@ import {
   }
 
   function parseUiLanguage(value: unknown): UiLanguage {
-    return value === "de" || value === "fr" || value === "en" ? value : "system";
+    return typeof value === "string" && SUPPORTED_UI_LANGUAGES.includes(value as UiLanguage)
+      ? (value as UiLanguage)
+      : "system";
   }
 
   function parseVoicePitch(value: unknown): VoicePitch {

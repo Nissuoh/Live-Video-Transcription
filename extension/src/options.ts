@@ -21,7 +21,21 @@ import {
     preserveVoicePitch?: boolean;
   }
 
-  type UiLanguage = "system" | "en" | "de" | "fr";
+  type UiLanguage =
+    | "system"
+    | "en"
+    | "de"
+    | "fr"
+    | "es"
+    | "pt_BR"
+    | "zh_CN"
+    | "ja"
+    | "ko"
+    | "ar"
+    | "hi"
+    | "tr"
+    | "pl"
+    | "it";
   type VoiceGender = "male" | "female";
   type VoicePitch = "normal" | "high" | "low";
 
@@ -37,7 +51,22 @@ import {
     "preserveVoicePitch",
   ] as const;
 
-  const SUPPORTED_UI_LANGUAGES: readonly UiLanguage[] = ["system", "en", "de", "fr"];
+  const SUPPORTED_UI_LANGUAGES: readonly UiLanguage[] = [
+    "system",
+    "en",
+    "de",
+    "fr",
+    "es",
+    "pt_BR",
+    "zh_CN",
+    "ja",
+    "ko",
+    "ar",
+    "hi",
+    "tr",
+    "pl",
+    "it",
+  ];
   const LANGUAGE_CODES: readonly string[] = [
     "ar",
     "da",
@@ -221,6 +250,7 @@ import {
   function applyLocalization(): void {
     const locale = getEffectiveUiLocale();
     document.documentElement.lang = locale;
+    document.documentElement.dir = isRtlLocale(locale) ? "rtl" : "ltr";
     document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => {
       const key = element.dataset.i18n;
       if (key !== undefined) {
@@ -279,8 +309,8 @@ import {
   function formatLanguageLabel(languageCode: string): string {
     const locale = getEffectiveUiLocale();
     try {
-      const displayNames = new Intl.DisplayNames([locale], { type: "language" });
-      const localizedName = displayNames.of(languageCode);
+      const displayNames = new Intl.DisplayNames([toIntlLocale(locale)], { type: "language" });
+      const localizedName = displayNames.of(toIntlLocale(languageCode));
       if (localizedName !== undefined && localizedName.trim().length > 0) {
         return `${localizedName} (${languageCode.toUpperCase()})`;
       }
@@ -316,7 +346,7 @@ import {
   }
 
   function parseUiLanguage(value: unknown): UiLanguage {
-    return value === "de" || value === "fr" || value === "en" ? value : "system";
+    return isSupportedUiLanguage(value) ? value : "system";
   }
 
   function parseVoiceGender(value: unknown): VoiceGender {
@@ -415,7 +445,7 @@ import {
 
   function getEffectiveUiLocale(): string {
     if (activeUiLanguage !== "system") {
-      return activeUiLanguage;
+      return toIntlLocale(activeUiLanguage);
     }
     return getUiLocale();
   }
@@ -459,7 +489,49 @@ import {
     if (normalized.startsWith("fr")) {
       return "fr";
     }
+    if (normalized.startsWith("es")) {
+      return "es";
+    }
+    if (normalized.startsWith("pt")) {
+      return "pt_BR";
+    }
+    if (normalized.startsWith("zh")) {
+      return "zh_CN";
+    }
+    if (normalized.startsWith("ja")) {
+      return "ja";
+    }
+    if (normalized.startsWith("ko")) {
+      return "ko";
+    }
+    if (normalized.startsWith("ar")) {
+      return "ar";
+    }
+    if (normalized.startsWith("hi")) {
+      return "hi";
+    }
+    if (normalized.startsWith("tr")) {
+      return "tr";
+    }
+    if (normalized.startsWith("pl")) {
+      return "pl";
+    }
+    if (normalized.startsWith("it")) {
+      return "it";
+    }
     return "en";
+  }
+
+  function isSupportedUiLanguage(value: unknown): value is UiLanguage {
+    return typeof value === "string" && SUPPORTED_UI_LANGUAGES.includes(value as UiLanguage);
+  }
+
+  function toIntlLocale(locale: string): string {
+    return locale.replace("_", "-");
+  }
+
+  function isRtlLocale(locale: string): boolean {
+    return locale.toLowerCase().startsWith("ar");
   }
 
   function message(key: string, substitutions?: string | string[]): string {

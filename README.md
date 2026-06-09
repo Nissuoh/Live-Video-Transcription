@@ -163,6 +163,16 @@ The popup and options UI support selectable interface language through `uiLangua
 - English
 - German
 - French
+- Spanish
+- Portuguese (Brazil)
+- Chinese (Simplified)
+- Japanese
+- Korean
+- Arabic
+- Hindi
+- Turkish
+- Polish
+- Italian
 
 Source and target language labels are rendered through `Intl.DisplayNames`, so language names match the selected interface language where the browser supports it.
 
@@ -201,3 +211,9 @@ npm run local:unpacked
 7. Open the extension popup, save `local-dev-token`, enable automatic translation, and test playback.
 
 See [docs/USER_WORKFLOW_AND_ARCHITECTURE.md](docs/USER_WORKFLOW_AND_ARCHITECTURE.md) for the full user and system workflow.
+
+## Gemini 3.5 Live Translate
+
+Google's `gemini-3.5-live-translate-preview` is documented as a low-latency audio-to-audio Live API translation model with 70+ supported languages. It is not a drop-in replacement for this V1 pipeline because this project currently sends YouTube captions as text, while Live Translate accepts audio input and returns translated speech.
+
+For production V1, keep using the transcript-based pipeline. For V2, evaluate a separate audio-to-audio architecture that streams raw PCM audio through the backend, uses ephemeral Gemini tokens or server-side sessions, and accounts for the current preview limitations documented by Google.
