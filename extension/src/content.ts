@@ -637,13 +637,39 @@
   }
 
   async function fetchTranscript(track: CaptionTrack): Promise<TranscriptItem[]> {
-    const url = new URL(track.baseUrl);
-    url.searchParams.set("fmt", "json3");
-    const response = await fetch(url.toString(), { credentials: "include" });
-    if (!response.ok) {
-      throw new Error(`Caption fetch failed with HTTP ${response.status}`);
+    const errors: string[] = [];
+    for (const format of ["json3", "srv3"] as const) {
+      const url = new URL(track.baseUrl);
+      url.searchParams.set("fmt", format);
+      try {
+        const response = await fetch(url.toString(), { credentials: "include" });
+        if (!response.ok) {
+          errors.push(`${format} HTTP ${response.status}`);
+          continue;
+        }
+        const body = await response.text();
+        if (body.trim().length === 0) {
+          errors.push(`${format} response was empty`);
+          continue;
+        }
+        const transcript =
+          format === "json3"
+            ? parseJsonTranscript(JSON.parse(body) as YouTubeTimedTextResponse)
+            : parseXmlTranscript(body);
+        if (transcript.length > 0) {
+          return transcript;
+        }
+        errors.push(`${format} response did not contain transcript text`);
+      } catch (error: unknown) {
+        errors.push(
+          `${format} parse failed: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+      }
     }
-    const timedText = (await response.json()) as YouTubeTimedTextResponse;
+    throw new Error(`Caption fetch failed: ${errors.join("; ")}`);
+  }
+
+  function parseJsonTranscript(timedText: YouTubeTimedTextResponse): TranscriptItem[] {
     const events = timedText.events ?? [];
     const transcript: TranscriptItem[] = [];
     for (let index = 0; index < events.length; index += 1) {
@@ -670,6 +696,83 @@
       });
     }
     return transcript;
+  }
+
+  function parseXmlTranscript(xml: string): TranscriptItem[] {
+    const document = new DOMParser().parseFromString(xml, "text/xml");
+    if (document.querySelector("parsererror") !== null) {
+      throw new Error("caption XML was invalid");
+    }
+
+    const legacyTextTranscript = parseLegacyTextNodes(document);
+    if (legacyTextTranscript.length > 0) {
+      return legacyTextTranscript;
+    }
+    return parseSrv3ParagraphNodes(document);
+  }
+
+  function parseLegacyTextNodes(document: Document): TranscriptItem[] {
+    return Array.from(document.querySelectorAll("text"))
+      .map((node) => {
+        const start = Number(node.getAttribute("start"));
+        const duration = Number(node.getAttribute("dur") ?? "2");
+        const text = normalizeCaptionText(node.textContent ?? "");
+        if (
+          !Number.isFinite(start) ||
+          !Number.isFinite(duration) ||
+          start < 0 ||
+          duration <= 0 ||
+          text.length === 0
+        ) {
+          return null;
+        }
+        return { start, duration, text };
+      })
+      .filter((item): item is TranscriptItem => item !== null);
+  }
+
+  function parseSrv3ParagraphNodes(document: Document): TranscriptItem[] {
+    const paragraphs = Array.from(document.querySelectorAll("p"));
+    const transcript: TranscriptItem[] = [];
+    for (let index = 0; index < paragraphs.length; index += 1) {
+      const paragraph = paragraphs[index];
+      if (paragraph === undefined) {
+        continue;
+      }
+      const startMs = Number(paragraph.getAttribute("t"));
+      const explicitDurationMs = Number(paragraph.getAttribute("d"));
+      const nextStartMs = Number(paragraphs[index + 1]?.getAttribute("t"));
+      const durationMs = Number.isFinite(explicitDurationMs)
+        ? explicitDurationMs
+        : Number.isFinite(nextStartMs)
+          ? Math.max(250, nextStartMs - startMs)
+          : 2000;
+      const segments = Array.from(paragraph.querySelectorAll("s"));
+      const text = normalizeCaptionText(
+        segments.length > 0
+          ? segments.map((segment) => segment.textContent ?? "").join("")
+          : paragraph.textContent ?? "",
+      );
+      if (
+        !Number.isFinite(startMs) ||
+        !Number.isFinite(durationMs) ||
+        startMs < 0 ||
+        durationMs <= 0 ||
+        text.length === 0
+      ) {
+        continue;
+      }
+      transcript.push({
+        start: startMs / 1000,
+        duration: durationMs / 1000,
+        text,
+      });
+    }
+    return transcript;
+  }
+
+  function normalizeCaptionText(text: string): string {
+    return text.replace(/\s+/g, " ").trim();
   }
 
   function parseStreamChunk(value: unknown): StreamChunk {
