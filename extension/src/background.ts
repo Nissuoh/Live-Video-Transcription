@@ -1,3 +1,5 @@
+import { DEFAULT_BACKEND_WSS_URL, resolveBackendWssUrl } from "./defaults.js";
+
 (() => {
   type Platform = "youtube";
 
@@ -86,7 +88,7 @@
       defaults.authToken = "";
     }
     if (typeof existing.backendWssUrl !== "string") {
-      defaults.backendWssUrl = "";
+      defaults.backendWssUrl = DEFAULT_BACKEND_WSS_URL;
     }
     if (typeof existing.autoTranslate !== "boolean") {
       defaults.autoTranslate = false;
@@ -155,8 +157,7 @@
     const config = (await chrome.storage.local.get([...CONFIG_KEYS])) as ExtensionConfig;
     const enabled = config.autoTranslate === true;
     const authToken = typeof config.authToken === "string" ? config.authToken.trim() : "";
-    const backendWssUrl =
-      typeof config.backendWssUrl === "string" ? config.backendWssUrl.trim() : "";
+    const backendWssUrl = resolveBackendWssUrl(config.backendWssUrl);
     const sourceLanguage =
       typeof config.sourceLanguage === "string" && config.sourceLanguage.trim().length > 0
         ? config.sourceLanguage.trim()
@@ -282,8 +283,7 @@
   async function loadConfig(): Promise<Required<ExtensionConfig>> {
     const stored = (await chrome.storage.local.get([...CONFIG_KEYS])) as ExtensionConfig;
     const authToken = typeof stored.authToken === "string" ? stored.authToken.trim() : "";
-    const backendWssUrl =
-      typeof stored.backendWssUrl === "string" ? stored.backendWssUrl.trim() : "";
+    const backendWssUrl = resolveBackendWssUrl(stored.backendWssUrl);
     if (stored.autoTranslate !== true) {
       throw new Error(localizedMessage("autoTranslationDisabledError"));
     }

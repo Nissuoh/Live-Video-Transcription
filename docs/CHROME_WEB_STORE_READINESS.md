@@ -30,7 +30,7 @@ This document tracks non-code work that must be completed before submitting the 
   - Web browsing activity: current YouTube video id/page context, only for the user-facing translation feature.
   - Authentication information: extension auth token stored locally in `chrome.storage.local`.
 - User-facing popup controls:
-  - Backend WSS URL.
+  - Backend WSS URL only when no build-time backend default is configured.
   - API/Auth token.
   - Source and target language selection.
   - Automatic translation opt-in toggle.

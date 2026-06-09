@@ -53,6 +53,16 @@ TRANSLATION_PROVIDER=deepl
 TTS_PROVIDER=elevenlabs
 ```
 
+OpenRouter als Text-Uebersetzer mit separatem TTS-Provider:
+
+```env
+TRANSLATION_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
+TTS_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
 ## Chrome Extension
 
 ```powershell
@@ -77,6 +87,8 @@ Die Extension erwartet in `chrome.storage.local`:
 ```
 
 Die Extension akzeptiert nur `wss://` URLs fuer das Backend. YouTube-Seite, aktuelles Video und Caption-Track werden automatisch erkannt; im Popup wird kein Video-Link eingegeben. Automatische Uebersetzung startet erst, wenn sie im Popup aktiviert und gueltig konfiguriert wurde.
+
+Fuer den Produktmodus kann die Backend-URL in [extension/src/defaults.ts](extension/src/defaults.ts) als `DEFAULT_BACKEND_WSS_URL` gesetzt werden. Dann muss der Nutzer im Popup nur noch API/Auth-Token, Sprachwahl und Aktivierung bedienen. Ohne gesetzte Produkt-URL bleibt das Backend-Feld sichtbar, damit lokal oder mit einem Tunnel getestet werden kann.
 
 Die UI nutzt Chrome `_locales` fuer statische Texte und `Intl.DisplayNames` fuer Sprachbezeichnungen. Dadurch wird `de` je nach Browser-Sprache als `Deutsch`, `German`, `aleman` oder entsprechend lokal angezeigt.
 

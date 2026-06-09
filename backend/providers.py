@@ -199,6 +199,32 @@ def _extract_openai_response_text(payload: dict[str, Any]) -> str:
     raise ProviderRequestError("OpenAI response did not contain text output")
 
 
+def _extract_chat_completion_text(provider: str, payload: dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ProviderRequestError(f"{provider} response did not contain choices")
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        raise ProviderRequestError(f"{provider} response choice was invalid")
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        raise ProviderRequestError(f"{provider} response did not contain a message")
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return _clean_output(content)
+    if isinstance(content, list):
+        fragments: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if isinstance(text, str):
+                fragments.append(text)
+        if fragments:
+            return _clean_output(" ".join(fragments))
+    raise ProviderRequestError(f"{provider} response did not contain text content")
+
+
 class OpenAITranslator(TranslationProvider):
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
         self._settings = settings
@@ -286,6 +312,60 @@ class DeepLTranslator(TranslationProvider):
         translated = translations[0].get("text")
         if not isinstance(translated, str):
             raise ProviderRequestError("DeepL response did not contain translated text")
+        return _duration_guard(
+            translated,
+            duration_seconds,
+            self._settings.duration_guard_chars_per_second,
+        )
+
+
+class OpenRouterTranslator(TranslationProvider):
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        self._settings = settings
+        self._client = client
+        self._api_key = _secret_value(settings.openrouter_api_key, "OPENROUTER_API_KEY")
+
+    async def translate(
+        self,
+        text: str,
+        *,
+        duration_seconds: float,
+        target_language: str = "de",
+    ) -> str:
+        target_name = _language_name(target_language)
+        prompt = (
+            f"Uebersetze ins {target_name}. "
+            f"Komprimiere semantisch, sodass die Sprechdauer {duration_seconds:.2f} Sekunden "
+            "nicht ueberschreitet. Nur nackter Output."
+        )
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        if self._settings.openrouter_site_url:
+            headers["HTTP-Referer"] = self._settings.openrouter_site_url
+        if self._settings.openrouter_app_name:
+            headers["X-Title"] = self._settings.openrouter_app_name
+
+        response = await _post_with_retries(
+            "OpenRouter translation",
+            self._client,
+            self._settings,
+            f"{self._settings.openrouter_base_url}/chat/completions",
+            headers=headers,
+            json={
+                "model": self._settings.openrouter_model,
+                "messages": [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": text},
+                ],
+                "temperature": self._settings.openrouter_temperature,
+                "max_tokens": self._settings.openrouter_max_tokens,
+            },
+            timeout=self._settings.provider_timeout_seconds,
+        )
+        await _raise_for_provider_error("OpenRouter translation", response)
+        translated = _extract_chat_completion_text("OpenRouter", response.json())
         return _duration_guard(
             translated,
             duration_seconds,
@@ -403,6 +483,8 @@ def build_translation_provider(
         return OpenAITranslator(settings, client)
     if settings.translation_provider == "deepl":
         return DeepLTranslator(settings, client)
+    if settings.translation_provider == "openrouter":
+        return OpenRouterTranslator(settings, client)
     raise ProviderConfigurationError(f"Unsupported translation provider: {settings.translation_provider}")
 
 

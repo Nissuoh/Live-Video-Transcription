@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     auth_tokens: str = Field(min_length=1)
-    translation_provider: Literal["openai", "deepl"] = "openai"
+    translation_provider: Literal["openai", "deepl", "openrouter"] = "openai"
     tts_provider: Literal["openai", "elevenlabs"] = "openai"
 
     max_chunk_concurrency: int = Field(default=3, ge=1, le=16)
@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     deepl_api_base: str = "https://api.deepl.com"
     deepl_target_lang: str = "DE"
 
+    openrouter_api_key: SecretStr | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openai/gpt-4o-mini"
+    openrouter_site_url: str | None = None
+    openrouter_app_name: str = "Live Video Translation"
+    openrouter_max_tokens: int = Field(default=220, ge=16, le=2000)
+    openrouter_temperature: float = Field(default=0.2, ge=0, le=2)
+
     elevenlabs_api_key: SecretStr | None = None
     elevenlabs_voice_id: str | None = None
     elevenlabs_model_id: str = "eleven_multilingual_v2"
@@ -59,7 +67,7 @@ class Settings(BaseSettings):
     duration_guard_chars_per_second: float = Field(default=14.0, gt=1, le=40)
     tts_max_playback_rate: float = Field(default=1.35, ge=1.0, le=4.0)
 
-    @field_validator("openai_base_url", "deepl_api_base")
+    @field_validator("openai_base_url", "deepl_api_base", "openrouter_base_url")
     @classmethod
     def strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")

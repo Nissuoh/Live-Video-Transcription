@@ -22,17 +22,19 @@
       <form id="options-form" novalidate>
         <section class="settings-section" aria-labelledby="connection-heading">
           <h2 id="connection-heading" data-i18n="connectionSection">Connection</h2>
-          <label for="backend-wss-url" data-i18n="backendUrlLabel">Backend WebSocket URL</label>
-          <input
-            id="backend-wss-url"
-            name="backendWssUrl"
-            type="url"
-            inputmode="url"
-            placeholder="wss://example.com/stream"
-            data-i18n-placeholder="backendUrlPlaceholder"
-            autocomplete="url"
-            required
-          />
+          <div id="backend-field">
+            <label for="backend-wss-url" data-i18n="backendUrlLabel">Backend WebSocket URL</label>
+            <input
+              id="backend-wss-url"
+              name="backendWssUrl"
+              type="url"
+              inputmode="url"
+              placeholder="wss://example.com/stream"
+              data-i18n-placeholder="backendUrlPlaceholder"
+              autocomplete="url"
+              required
+            />
+          </div>
 
           <label for="auth-token" data-i18n="authTokenLabel">API/Auth token</label>
           <input

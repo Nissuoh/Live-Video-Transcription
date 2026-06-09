@@ -6,7 +6,6 @@
 2. The user opens YouTube and starts an English video with captions.
 3. The user clicks the extension icon.
 4. The popup shows:
-   - Backend WebSocket URL.
    - API/Auth token.
    - Source language, rendered in the user's browser language.
    - Target language, rendered in the user's browser language.
@@ -59,6 +58,23 @@ There are two different keys:
 - Provider API keys: OpenAI, DeepL, ElevenLabs. These stay on the backend and are never shipped inside the extension.
 
 Putting provider API keys directly into the extension would make billing, abuse control, and key protection weaker. It can be supported later as a bring-your-own-key mode, but it is a different product model.
+
+## Backend URL Automation
+
+For a public product, the backend WebSocket URL should be configured at build time in `extension/src/defaults.ts` through `DEFAULT_BACKEND_WSS_URL`.
+
+When this value is set, the popup uses that backend automatically and hides the backend URL field. The user only enters the API/Auth token, chooses languages, and enables translation.
+
+When this value is empty, the backend URL field remains visible for local development, staging, or tunnel-based testing.
+
+## Provider Options
+
+Translation and TTS are separate provider strategies:
+
+- Translation: OpenAI, DeepL, or OpenRouter.
+- TTS: OpenAI TTS or ElevenLabs.
+
+OpenRouter can be used for text translation and compression. Speech synthesis still needs a TTS provider because OpenRouter chat completions return text, not synchronized speech audio for this pipeline.
 
 ## Language Display
 

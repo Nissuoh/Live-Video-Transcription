@@ -1,3 +1,9 @@
+import {
+  DEFAULT_BACKEND_WSS_URL,
+  hasDefaultBackendWssUrl,
+  resolveBackendWssUrl,
+} from "./defaults.js";
+
 (() => {
   interface ExtensionConfig {
     authToken?: string;
@@ -67,6 +73,7 @@
   };
 
   const form = requireElement("#options-form", HTMLFormElement);
+  const backendField = requireElement("#backend-field", HTMLDivElement);
   const backendInput = requireElement("#backend-wss-url", HTMLInputElement);
   const tokenInput = requireElement("#auth-token", HTMLInputElement);
   const sourceLanguageInput = requireElement("#source-language", HTMLSelectElement);
@@ -76,6 +83,7 @@
   const status = requireElement("#status", HTMLParagraphElement);
 
   applyLocalization();
+  applyBackendDefaults();
   populateLanguageSelect(sourceLanguageInput, "en");
   populateLanguageSelect(targetLanguageInput, "de");
   void loadOptions();
@@ -102,7 +110,7 @@
       typeof config.sourceLanguage === "string" ? config.sourceLanguage : "en";
     const targetLanguage =
       typeof config.targetLanguage === "string" ? config.targetLanguage : "de";
-    backendInput.value = typeof config.backendWssUrl === "string" ? config.backendWssUrl : "";
+    backendInput.value = resolveBackendWssUrl(config.backendWssUrl);
     tokenInput.value = typeof config.authToken === "string" ? config.authToken : "";
     autoTranslateInput.checked = config.autoTranslate === true;
     populateLanguageSelect(sourceLanguageInput, sourceLanguage);
@@ -115,7 +123,7 @@
       setStatus(message("storageUnavailableError"), "error");
       return;
     }
-    const backendWssUrl = backendInput.value.trim();
+    const backendWssUrl = resolveBackendWssUrl(backendInput.value);
     const authToken = tokenInput.value.trim();
     const autoTranslate = autoTranslateInput.checked;
     const sourceLanguage = sourceLanguageInput.value;
@@ -158,6 +166,14 @@
           element.placeholder = message(key);
         }
       });
+  }
+
+  function applyBackendDefaults(): void {
+    if (!hasDefaultBackendWssUrl()) {
+      return;
+    }
+    backendInput.value = DEFAULT_BACKEND_WSS_URL;
+    backendField.hidden = true;
   }
 
   function populateLanguageSelect(select: HTMLSelectElement, selectedLanguage: string): void {
