@@ -1094,12 +1094,27 @@
 
     const transcriptButton = findTranscriptButton();
     if (transcriptButton === null) {
-      throw new Error("Could not find YouTube transcript button");
+      throw new Error(`Could not find YouTube transcript button (${describeTranscriptDomState()})`);
     }
     clickElement(transcriptButton);
   }
 
   function expandYouTubeDescription(): void {
+    const directExpandSelectors = [
+      "ytd-watch-metadata ytd-text-inline-expander #expand",
+      "ytd-watch-metadata tp-yt-paper-button#expand",
+      "ytd-watch-metadata button#expand",
+      "#description-inline-expander #expand",
+      "#description tp-yt-paper-button#expand",
+      "#description button#expand",
+    ];
+    for (const selector of directExpandSelectors) {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (element !== null) {
+        clickElement(element);
+      }
+    }
+
     const candidates = Array.from(
       document.querySelectorAll<HTMLElement>(
         [
@@ -1113,7 +1128,7 @@
       ),
     );
     const expandButton = candidates.find((element) => {
-      if (!isVisibleElement(element)) {
+      if (!isInteractableElement(element)) {
         return false;
       }
       const label = getElementSearchText(element);
@@ -1125,6 +1140,21 @@
   }
 
   function findTranscriptButton(): HTMLElement | null {
+    const directSelectors = [
+      "ytd-video-description-transcript-section-renderer yt-button-shape button",
+      "ytd-video-description-transcript-section-renderer ytd-button-renderer button",
+      "ytd-video-description-transcript-section-renderer button",
+      "ytd-video-description-transcript-section-renderer [role='button']",
+      "#structured-description ytd-video-description-transcript-section-renderer button",
+      "#description ytd-video-description-transcript-section-renderer button",
+    ];
+    for (const selector of directSelectors) {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (element !== null) {
+        return element;
+      }
+    }
+
     const transcriptPattern =
       /(show transcript|open transcript|transcript anzeigen|transkript anzeigen|transkript|transcript|transcription|transcripción|transcrição|transcriptie|trascrizione|transkription|文字起こし)/i;
     const blockedPattern =
@@ -1143,7 +1173,7 @@
     );
     return (
       candidates.find((element) => {
-        if (!isVisibleElement(element)) {
+        if (!isInteractableElement(element)) {
           return false;
         }
         const label = getElementSearchText(element);
@@ -1172,7 +1202,7 @@
           "[class*='transcript-segment']",
         ].join(","),
       ),
-    ).filter(isVisibleElement);
+    ).filter(isInteractableElement);
 
     const transcript = segmentElements
       .map(parseDomTranscriptSegment)
@@ -1208,6 +1238,7 @@
   }
 
   function clickElement(element: HTMLElement): void {
+    element.scrollIntoView({ block: "center", inline: "center" });
     element.click();
     element.dispatchEvent(
       new MouseEvent("click", {
@@ -1216,6 +1247,11 @@
         view: window,
       }),
     );
+  }
+
+  function isInteractableElement(element: HTMLElement): boolean {
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
   }
 
   function isVisibleElement(element: HTMLElement): boolean {
@@ -1238,6 +1274,15 @@
         element.getAttribute("title") ?? "",
       ].join(" "),
     );
+  }
+
+  function describeTranscriptDomState(): string {
+    return [
+      `section=${document.querySelectorAll("ytd-video-description-transcript-section-renderer").length}`,
+      `buttons=${document.querySelectorAll("button,[role='button'],tp-yt-paper-button").length}`,
+      `panel=${getTranscriptPanelElement() !== null}`,
+      `segments=${document.querySelectorAll("ytd-transcript-segment-renderer,yt-transcript-segment-renderer").length}`,
+    ].join(", ");
   }
 
   function delay(milliseconds: number): Promise<void> {
