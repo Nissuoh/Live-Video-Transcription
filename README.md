@@ -178,6 +178,8 @@ Source and target language labels are rendered through `Intl.DisplayNames`, so l
 
 `preserveVoicePitch` is enabled by default. When the user changes YouTube playback speed to 1.25x, 1.5x, or 2x, translated speech stays synchronized while the content script uses Chrome's native pitch-preserving media playback so a low male voice does not become artificially high or robotic.
 
+The backend also normalizes German TTS text before speech synthesis. Years, year ranges, times, percentages, currencies, units, links, and e-mail addresses are converted into more natural spoken forms.
+
 For a public production build, set `DEFAULT_BACKEND_WSS_URL` in [extension/src/defaults.ts](extension/src/defaults.ts). Then users only enter the backend access token, choose languages and voice settings, and enable translation.
 
 ## Local End-to-End Test

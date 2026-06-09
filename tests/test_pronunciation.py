@@ -30,6 +30,31 @@ class PronunciationTests(unittest.TestCase):
             "Das war neunzehn hundert sechsundneunzig, nicht zweitausend.",
         )
 
+    def test_naturalizes_time_percent_currency_and_units(self) -> None:
+        result = normalize_tts_pronunciation(
+            "Um 18:05 waren es 3,5% bei 120 km/h und $12.50.",
+            target_language="de",
+            tts_provider="edge_tts",
+        )
+
+        self.assertEqual(
+            result,
+            "Um achtzehn Uhr null fünf waren es drei Komma fünf Prozent "
+            "bei hundertzwanzig Kilometer pro Stunde und zwölf Dollar fünfzig Cent.",
+        )
+
+    def test_naturalizes_year_ranges_and_links(self) -> None:
+        result = normalize_tts_pronunciation(
+            "Mehr dazu 1996-2000 auf https://example.com/test.",
+            target_language="de",
+            tts_provider="edge_tts",
+        )
+
+        self.assertEqual(
+            result,
+            "Mehr dazu neunzehn hundert sechsundneunzig bis zweitausend auf Link.",
+        )
+
     def test_explicit_none_mode_keeps_text_unchanged(self) -> None:
         result = normalize_tts_pronunciation(
             "Im Jahr 1996.",

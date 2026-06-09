@@ -93,6 +93,10 @@ YouTube playback speed and translated speech speed stay synchronized. With `pres
 
 The content script refreshes transcript windows using the active YouTube playback rate. At 1.5x or 2x it requests the next backend stream earlier, so the translated audio buffer does not run out just because video time advances faster than real time.
 
+## Speech Naturalization
+
+Before text is sent to TTS, the backend applies German speech normalization for common cases that otherwise sound robotic: years, year ranges, clock times, percentages, currencies, physical/data units, links, and e-mail addresses. The translator prompts also ask for short, natural spoken German instead of written or list-like output.
+
 ## Provider Rate Limits
 
 Some OpenAI projects have low request-per-minute limits. The backend parses provider retry hints such as "try again in 12s" and backs off instead of closing the WebSocket stream immediately. For smoother local testing with low RPM limits, keep `MAX_CHUNK_CONCURRENCY=1`, use the default retry settings, and avoid repeatedly restarting the same video while the backend is already processing a stream.

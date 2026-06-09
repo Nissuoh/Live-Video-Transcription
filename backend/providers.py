@@ -138,6 +138,19 @@ def _language_name(language_code: str) -> str:
     return names.get(language_code.lower(), language_code)
 
 
+def _translation_prompt(target_name: str, duration_seconds: float) -> str:
+    return (
+        f"Uebersetze ins {target_name}. "
+        f"Komprimiere semantisch, sodass die Sprechdauer {duration_seconds:.2f} Sekunden "
+        "nicht ueberschreitet. "
+        "Formuliere natuerlich fuer gesprochene TTS-Ausgabe: kurze, fluessige Saetze; "
+        "keine Listen, kein Markdown. "
+        "Schreibe Jahreszahlen, Uhrzeiten, Prozentwerte, Geldbetraege, Einheiten und "
+        "wichtige Abkuerzungen so, dass sie natuerlich ausgesprochen werden. "
+        "Nur nackter Output."
+    )
+
+
 def _deepl_target_language(language_code: str, fallback: str) -> str:
     normalized = language_code.strip().upper().replace("-", "_")
     supported = {
@@ -366,11 +379,7 @@ class OpenAITranslator(TranslationProvider):
         target_language: str = "de",
     ) -> str:
         target_name = _language_name(target_language)
-        prompt = (
-            f"\u00dcbersetze ins {target_name}. "
-            f"Komprimiere semantisch, sodass die Sprechdauer {duration_seconds:.2f} Sekunden "
-            "nicht \u00fcberschreitet. Nur nackter Output."
-        )
+        prompt = _translation_prompt(target_name, duration_seconds)
         response = await _post_with_retries(
             "OpenAI translation",
             self._client,
@@ -460,11 +469,7 @@ class OpenRouterTranslator(TranslationProvider):
         target_language: str = "de",
     ) -> str:
         target_name = _language_name(target_language)
-        prompt = (
-            f"Uebersetze ins {target_name}. "
-            f"Komprimiere semantisch, sodass die Sprechdauer {duration_seconds:.2f} Sekunden "
-            "nicht ueberschreitet. Nur nackter Output."
-        )
+        prompt = _translation_prompt(target_name, duration_seconds)
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",

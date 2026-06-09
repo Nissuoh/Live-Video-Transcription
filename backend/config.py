@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     openai_tts_response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     openai_tts_instructions: str = (
         "Sprich klares, natuerliches Hochdeutsch mit ruhiger Synchronisationsgeschwindigkeit. "
+        "Der Text ist fuer gesprochene Ausgabe vorbereitet; lies Zahlen, Jahre, Uhrzeiten, "
+        "Prozentwerte, Geldbetraege und Einheiten natuerlich im Kontext vor. "
         "Englische Akronyme, Agenturnamen und Tech-Begriffe wie CIA, FBI, NSA, AI, API, GPU, "
         "URL, VPN, USB, HTML und HTTPS werden auf Englisch ausgesprochen oder buchstabiert. "
         "Eigennamen und Produktnamen nicht eindeutschen."
@@ -92,10 +94,12 @@ class Settings(BaseSettings):
     gemini_tts_female_voice: str = "Kore"
     gemini_tts_sample_rate: int = Field(default=24000, ge=8000, le=48000)
     gemini_tts_instructions: str = (
-        "Sprich klares, natuerliches Hochdeutsch. Englische Akronyme, Agenturnamen "
-        "und Tech-Begriffe wie CIA, FBI, NSA, AI, API, GPU, URL, VPN, USB, HTML "
-        "und HTTPS werden auf Englisch ausgesprochen oder buchstabiert. Eigennamen "
-        "und Produktnamen nicht eindeutschen."
+        "Sprich klares, natuerliches Hochdeutsch. Der Text ist fuer gesprochene Ausgabe "
+        "vorbereitet; lies Zahlen, Jahre, Uhrzeiten, Prozentwerte, Geldbetraege und "
+        "Einheiten natuerlich im Kontext vor. Englische Akronyme, Agenturnamen und "
+        "Tech-Begriffe wie CIA, FBI, NSA, AI, API, GPU, URL, VPN, USB, HTML und HTTPS "
+        "werden auf Englisch ausgesprochen oder buchstabiert. Eigennamen und Produktnamen "
+        "nicht eindeutschen."
     )
 
     piper_exe_path: str | None = None
