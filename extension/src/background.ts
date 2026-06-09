@@ -1,4 +1,8 @@
-import { DEFAULT_BACKEND_WSS_URL, resolveBackendWssUrl } from "./defaults.js";
+import {
+  DEFAULT_BACKEND_WSS_URL,
+  isAllowedBackendStreamUrl,
+  resolveBackendWssUrl,
+} from "./defaults.js";
 
 (() => {
   type Platform = "youtube";
@@ -169,7 +173,7 @@ import { DEFAULT_BACKEND_WSS_URL, resolveBackendWssUrl } from "./defaults.js";
     return {
       ok: true,
       enabled,
-      configured: enabled && authToken.length > 0 && isValidWssStreamUrl(backendWssUrl),
+      configured: enabled && authToken.length > 0 && isAllowedBackendStreamUrl(backendWssUrl),
       sourceLanguage,
       targetLanguage,
     };
@@ -381,17 +385,8 @@ import { DEFAULT_BACKEND_WSS_URL, resolveBackendWssUrl } from "./defaults.js";
   }
 
   function assertWssUrl(value: string): void {
-    if (!isValidWssStreamUrl(value)) {
+    if (!isAllowedBackendStreamUrl(value)) {
       throw new Error(localizedMessage("backendUrlInvalidError"));
-    }
-  }
-
-  function isValidWssStreamUrl(value: string): boolean {
-    try {
-      const url = new URL(value);
-      return url.protocol === "wss:" && url.pathname.endsWith("/stream");
-    } catch {
-      return false;
     }
   }
 

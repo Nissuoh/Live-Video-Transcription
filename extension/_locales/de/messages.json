@@ -66,7 +66,7 @@
     "message": "Einstellungen sind ungueltig."
   },
   "backendWssError": {
-    "message": "Backend-URL muss mit wss:// beginnen."
+    "message": "Backend-URL muss wss:// oder lokal ws://localhost verwenden."
   },
   "backendStreamPathError": {
     "message": "Backend-URL muss auf /stream zeigen."
@@ -117,7 +117,7 @@
     "message": "Auth-Token fehlt. Oeffne die Erweiterungsoptionen und speichere einen Token."
   },
   "backendUrlInvalidError": {
-    "message": "Backend-URL muss wss:// verwenden und auf /stream zeigen"
+    "message": "Backend-URL muss wss:// oder lokal ws://localhost verwenden und auf /stream zeigen"
   },
   "missingElementError": {
     "message": "Erforderliches Element fehlt: $SELECTOR$",

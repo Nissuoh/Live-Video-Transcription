@@ -92,4 +92,44 @@ Fuer den Produktmodus kann die Backend-URL in [extension/src/defaults.ts](extens
 
 Die UI nutzt Chrome `_locales` fuer statische Texte und `Intl.DisplayNames` fuer Sprachbezeichnungen. Dadurch wird `de` je nach Browser-Sprache als `Deutsch`, `German`, `aleman` oder entsprechend lokal angezeigt.
 
+## Lokaler End-to-End-Test
+
+1. `.env` anlegen oder bearbeiten.
+2. Provider konfigurieren:
+
+```env
+AUTH_TOKENS=local-dev-token
+TRANSLATION_PROVIDER=openai
+TTS_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+Oder OpenRouter fuer Text plus OpenAI TTS:
+
+```env
+AUTH_TOKENS=local-dev-token
+TRANSLATION_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
+TTS_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+3. Backend starten:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+4. Lokale Extension bauen:
+
+```powershell
+cd extension
+npm run local:unpacked
+```
+
+5. In `chrome://extensions` den Ordner `extension-unpacked` laden oder neu laden.
+6. Im Popup `local-dev-token` eintragen, automatische Uebersetzung aktivieren und auf YouTube testen.
+
 Siehe [docs/USER_WORKFLOW_AND_ARCHITECTURE.md](docs/USER_WORKFLOW_AND_ARCHITECTURE.md) fuer den vollstaendigen Nutzer- und Systemablauf.

@@ -1,6 +1,7 @@
 import {
   DEFAULT_BACKEND_WSS_URL,
   hasDefaultBackendWssUrl,
+  isAllowedBackendStreamUrl,
   resolveBackendWssUrl,
 } from "./defaults.js";
 
@@ -54,7 +55,7 @@ import {
     backendStreamPathError: "Backend URL must point to /stream.",
     backendUrlLabel: "Backend WebSocket URL",
     backendUrlPlaceholder: "wss://example.com/stream",
-    backendWssError: "Backend URL must start with wss://.",
+    backendWssError: "Backend URL must use wss:// or local ws://localhost.",
     connectionSection: "Connection",
     hideTokenButton: "Hide token",
     languageSection: "Language",
@@ -218,10 +219,10 @@ import {
     } catch {
       throw new Error(message("backendWssError"));
     }
-    if (url.protocol !== "wss:") {
-      throw new Error(message("backendWssError"));
-    }
-    if (!url.pathname.endsWith("/stream")) {
+    if (!isAllowedBackendStreamUrl(value)) {
+      if (url.pathname.endsWith("/stream")) {
+        throw new Error(message("backendWssError"));
+      }
       throw new Error(message("backendStreamPathError"));
     }
   }
