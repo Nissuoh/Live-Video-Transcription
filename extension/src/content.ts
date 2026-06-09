@@ -600,7 +600,11 @@
 
   async function extractPlayerResponse(): Promise<YouTubePlayerResponse | null> {
     const fromPage = await requestPlayerResponseFromPage();
-    return fromPage ?? extractInitialPlayerResponseFromScripts();
+    const playerResponse = fromPage ?? extractInitialPlayerResponseFromScripts();
+    if (playerResponse === null) {
+      return null;
+    }
+    return augmentPlayerResponseWithTranscriptFallback(playerResponse);
   }
 
   function requestPlayerResponseFromPage(): Promise<YouTubePlayerResponse | null> {
@@ -663,6 +667,114 @@
       return null;
     }
     return value as YouTubePlayerResponse;
+  }
+
+  function augmentPlayerResponseWithTranscriptFallback(
+    playerResponse: YouTubePlayerResponse,
+  ): YouTubePlayerResponse {
+    if (hasInnertubeTranscriptFallback(playerResponse)) {
+      return playerResponse;
+    }
+    const fallback = extractTranscriptFallbackFromScripts(resolveVideoId(playerResponse));
+    if (fallback === null) {
+      return playerResponse;
+    }
+    return {
+      ...playerResponse,
+      transcriptFallback: fallback,
+    };
+  }
+
+  function extractTranscriptFallbackFromScripts(
+    videoId: string | null = resolvePageVideoId(),
+  ): YouTubeTranscriptFallback | null {
+    const apiKey = extractInnertubeApiKeyFromScripts();
+    const context = extractInnertubeContextFromScripts();
+    const params = extractTranscriptParamsFromScripts();
+    if (apiKey === null || context === null || params === null) {
+      return null;
+    }
+    const fallback: YouTubeTranscriptFallback = {
+      innertubeApiKey: apiKey,
+      innertubeContext: context,
+      params,
+    };
+    if (videoId !== null && videoId.length > 0) {
+      fallback.videoId = videoId;
+    }
+    return fallback;
+  }
+
+  function extractInnertubeApiKeyFromScripts(): string | null {
+    for (const source of getScriptSources()) {
+      if (!source.includes("INNERTUBE_API_KEY")) {
+        continue;
+      }
+      const apiKey = extractJsonStringProperty(source, "INNERTUBE_API_KEY");
+      if (apiKey !== null) {
+        return apiKey;
+      }
+    }
+    return null;
+  }
+
+  function extractInnertubeContextFromScripts(): Record<string, unknown> | null {
+    for (const source of getScriptSources()) {
+      if (!source.includes("INNERTUBE_CONTEXT")) {
+        continue;
+      }
+      const json = extractBalancedJson(source, '"INNERTUBE_CONTEXT"');
+      if (json === null) {
+        continue;
+      }
+      try {
+        const context = JSON.parse(json) as unknown;
+        if (isRecord(context)) {
+          return context;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function extractTranscriptParamsFromScripts(): string | null {
+    for (const source of getScriptSources()) {
+      if (!source.includes("getTranscriptEndpoint")) {
+        continue;
+      }
+      const match =
+        /"getTranscriptEndpoint"\s*:\s*\{\s*"params"\s*:\s*"((?:\\.|[^"\\])+)"/.exec(source);
+      if (match?.[1] === undefined) {
+        continue;
+      }
+      try {
+        return JSON.parse(`"${match[1]}"`) as string;
+      } catch {
+        return match[1];
+      }
+    }
+    return null;
+  }
+
+  function extractJsonStringProperty(source: string, property: string): string | null {
+    const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = new RegExp(`"${escapedProperty}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(
+      source,
+    );
+    if (match?.[1] === undefined) {
+      return null;
+    }
+    try {
+      return JSON.parse(`"${match[1]}"`) as string;
+    } catch {
+      return match[1];
+    }
+  }
+
+  function getScriptSources(): string[] {
+    return Array.from(document.scripts).map((script) => script.textContent ?? "");
   }
 
   function extractBalancedJson(source: string, marker: string): string | null {
@@ -874,6 +986,7 @@
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
+            ...buildInnertubeHeaders(context),
           },
           body: JSON.stringify({
             context,
@@ -900,6 +1013,17 @@
       }
     }
     throw new Error(`YouTube transcript panel fallback failed: ${errors.join("; ")}`);
+  }
+
+  function buildInnertubeHeaders(context: Record<string, unknown>): Record<string, string> {
+    const headers: Record<string, string> = {
+      "X-Youtube-Client-Name": "1",
+    };
+    const client = context.client;
+    if (isRecord(client) && typeof client.clientVersion === "string") {
+      headers["X-Youtube-Client-Version"] = client.clientVersion;
+    }
+    return headers;
   }
 
   async function fetchTranscript(track: CaptionTrack): Promise<TranscriptItem[]> {
@@ -1333,9 +1457,18 @@
       `URL: ${window.location.href}`,
       `Page video ID: ${resolvePageVideoId() ?? "unknown"}`,
       `Ad showing: ${isYouTubeAdShowing(video instanceof HTMLVideoElement ? video : undefined)}`,
+      `Transcript fallback metadata: ${describeTranscriptFallbackMetadata()}`,
       `Player classes: ${player?.className.toString() ?? "unknown"}`,
       `Message: ${message}`,
     ].join("\n");
+  }
+
+  function describeTranscriptFallbackMetadata(): string {
+    return [
+      `apiKey=${extractInnertubeApiKeyFromScripts() !== null}`,
+      `context=${extractInnertubeContextFromScripts() !== null}`,
+      `params=${extractTranscriptParamsFromScripts() !== null}`,
+    ].join(", ");
   }
 
   async function copyStatusReport(report: string): Promise<void> {
