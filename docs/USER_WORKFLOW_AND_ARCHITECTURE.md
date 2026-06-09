@@ -55,7 +55,7 @@ The only browser-supported way to talk to a local executable is Native Messaging
 There are two different keys:
 
 - User-facing API/Auth token: entered in the extension popup. It authenticates the user to your backend.
-- Provider API keys: OpenAI, DeepL, ElevenLabs. These stay on the backend and are never shipped inside the extension.
+- Provider API keys: OpenAI, DeepL, OpenRouter, ElevenLabs, Gemini, or other paid provider keys. These stay on the backend and are never shipped inside the extension.
 
 Putting provider API keys directly into the extension would make billing, abuse control, and key protection weaker. It can be supported later as a bring-your-own-key mode, but it is a different product model.
 
@@ -72,9 +72,11 @@ When this value is empty, the backend URL field remains visible for local develo
 Translation and TTS are separate provider strategies:
 
 - Translation: OpenAI, DeepL, or OpenRouter.
-- TTS: OpenAI TTS or ElevenLabs.
+- TTS: Microsoft Edge neural TTS through `edge_tts`, OpenAI TTS, Google Gemini TTS, ElevenLabs, local Piper, or Windows SAPI.
 
 OpenRouter can be used for text translation and compression. Speech synthesis still needs a TTS provider because OpenRouter chat completions return text, not synchronized speech audio for this pipeline.
+
+The default local quality recommendation is `TTS_PROVIDER=edge_tts` because it gives natural German neural voices with stronger mixed German/English pronunciation without requiring a separate TTS API key. For production, disclose Microsoft Edge neural text-to-speech as an external backend subprocess if this provider remains active. OpenAI, Gemini, and ElevenLabs are configured by changing `TTS_PROVIDER` plus the matching backend API key variables.
 
 ## Language Display
 
@@ -91,3 +93,5 @@ The smooth product flow requires:
 - User accounts or payment flow that issues auth tokens.
 - Store listing and privacy policy that disclose caption processing.
 - Reviewer test token and test backend URL.
+- Production build-time backend URL in `extension/src/defaults.ts`, or a clearly documented user-configured backend flow.
+- Production `WEBSOCKET_ALLOWED_ORIGINS` restricted to the published Chrome extension ID instead of `chrome-extension://*`.

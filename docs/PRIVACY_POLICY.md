@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: June 8, 2026
+Last updated: June 9, 2026
 
 Live Video Translation is a Chrome extension that translates available YouTube captions into synchronized AI-generated speech through a user-configured backend.
 
@@ -24,13 +24,13 @@ The current YouTube video identifier is used only to associate transcript chunks
 
 ## Data Sharing
 
-Depending on backend configuration, caption text may be sent to translation or text-to-speech providers such as OpenAI, DeepL, or ElevenLabs to provide the requested translation and speech generation.
+Depending on backend configuration, caption text may be sent to translation or text-to-speech providers such as OpenAI, DeepL, OpenRouter, ElevenLabs, Microsoft Edge neural text-to-speech, Google Gemini TTS, or locally configured Piper TTS to provide the requested translation and speech generation. Piper TTS runs locally on the backend host when selected.
 
 The extension does not sell user data. User data is not transferred to third parties except as necessary to provide the user-facing translation and speech feature, comply with law, protect against abuse, or operate the configured backend service.
 
 ## Storage
 
-The extension stores configuration locally in `chrome.storage.local`. Provider API keys for OpenAI, DeepL, ElevenLabs, or other backend providers are not stored in the extension and must remain on the backend.
+The extension stores configuration locally in `chrome.storage.local`. Provider API keys for OpenAI, DeepL, OpenRouter, ElevenLabs, Gemini, Microsoft Edge neural text-to-speech, Piper, or other backend providers are not stored in the extension and must remain on the backend.
 
 ## Security
 

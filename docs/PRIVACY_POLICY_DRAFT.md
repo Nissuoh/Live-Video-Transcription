@@ -8,7 +8,7 @@ Live Video Translation processes the following data only to provide synchronized
 
 - Current YouTube video identifier.
 - Available YouTube caption text, caption timing, and caption language metadata.
-- Extension configuration stored locally: backend WebSocket URL, auth token, and automatic translation preference.
+- Extension configuration stored locally: backend WebSocket URL, auth token, source language, target language, voice settings, and automatic translation preference.
 
 The extension does not collect YouTube video files, YouTube audio files, passwords, payment card data, emails, or unrelated page content.
 
@@ -20,7 +20,7 @@ The auth token is used only to authorize access to the backend service.
 
 ## Data Sharing
 
-The backend may transmit caption text to the configured translation and text-to-speech providers, such as OpenAI, DeepL, or ElevenLabs, depending on backend configuration. No executable code is sent from these providers to the extension.
+The backend may transmit caption text to the configured translation and text-to-speech providers, such as OpenAI, DeepL, OpenRouter, ElevenLabs, Microsoft Edge neural text-to-speech, Google Gemini TTS, or local Piper TTS, depending on backend configuration. Piper TTS runs locally on the backend host when selected. No executable code is sent from these providers to the extension.
 
 ## Storage
 
