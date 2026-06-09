@@ -31,5 +31,7 @@ class TTSProvider(ABC):
         *,
         target_duration_seconds: float,
         target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
     ) -> TTSResult:
         """Return encoded speech audio for the translated text."""

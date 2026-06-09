@@ -47,6 +47,30 @@
   "targetLanguageLabel": {
     "message": "To"
   },
+  "voiceSection": {
+    "message": "Voice"
+  },
+  "voiceGenderLabel": {
+    "message": "Voice gender"
+  },
+  "voiceGenderMale": {
+    "message": "Male"
+  },
+  "voiceGenderFemale": {
+    "message": "Female"
+  },
+  "voicePitchLabel": {
+    "message": "Pitch"
+  },
+  "voicePitchNormal": {
+    "message": "Normal"
+  },
+  "voicePitchLow": {
+    "message": "Low"
+  },
+  "voicePitchHigh": {
+    "message": "High"
+  },
   "autoTranslateLabel": {
     "message": "Enable automatic translation on YouTube"
   },

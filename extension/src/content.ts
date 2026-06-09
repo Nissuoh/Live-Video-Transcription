@@ -12,6 +12,8 @@
     platform: Platform;
     sourceLanguage: string;
     targetLanguage: string;
+    voiceGender: VoiceGender;
+    voicePitch: VoicePitch;
     transcript: TranscriptItem[];
   }
 
@@ -28,8 +30,22 @@
     configured?: boolean;
     sourceLanguage?: string;
     targetLanguage?: string;
+    voiceGender?: string;
+    voicePitch?: string;
     error?: string;
   }
+
+  interface RunState {
+    enabled: boolean;
+    configured: boolean;
+    sourceLanguage: string;
+    targetLanguage: string;
+    voiceGender: VoiceGender;
+    voicePitch: VoicePitch;
+  }
+
+  type VoiceGender = "male" | "female";
+  type VoicePitch = "normal" | "high" | "low";
 
   interface YouTubePlayerResponse {
     videoDetails?: {
@@ -96,6 +112,8 @@
   const MERGED_TRANSCRIPT_MAX_ITEMS = 2;
   const INITIAL_AUDIO_BUFFER_SECONDS = 4;
   const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 8000;
+  const BUFFER_UNDERRUN_GUARD_SECONDS = 0.9;
+  const BUFFER_GUARD_INTERVAL_MS = 500;
   const AD_RETRY_DELAY_MS = 1000;
   const STATUS_COPY_RESET_MS = 1600;
   const TRANSCRIPT_PANEL_WAIT_MS = 12000;
@@ -132,6 +150,7 @@
     private audioContext: AudioContext | null = null;
     private gainNode: GainNode | null = null;
     private animationFrameId: number | null = null;
+    private nextScheduledContextTime = 0;
 
     constructor(video: HTMLVideoElement, onAudioStateChanged: (state: AudioContextState) => void) {
       this.video = video;
@@ -336,12 +355,18 @@
       };
 
       const startDelay = Math.max(0, chunk.start - currentTime);
-      const when = context.currentTime + startDelay;
+      const requestedWhen = context.currentTime + startDelay;
       const audioOffset = calculateAudioOffset(chunk, currentTime);
+      const when = Math.max(requestedWhen, this.nextScheduledContextTime);
       this.activeSources.set(source, chunk.playbackRate);
       this.scheduledKeys.add(key);
       try {
         source.start(when, audioOffset);
+        const remainingSeconds = Math.max(0, chunk.buffer.duration - audioOffset);
+        this.nextScheduledContextTime = Math.max(
+          this.nextScheduledContextTime,
+          when + remainingSeconds / source.playbackRate.value,
+        );
       } catch (error: unknown) {
         this.activeSources.delete(source);
         console.warn("[Live Video Translation] Audio source scheduling failed", error);
@@ -357,6 +382,7 @@
         }
       }
       this.activeSources.clear();
+      this.nextScheduledContextTime = 0;
     }
   }
 
@@ -369,6 +395,7 @@
     private navigationTimer: number | null = null;
     private adRetryTimer: number | null = null;
     private streamRestartTimer: number | null = null;
+    private bufferGuardTimer: number | null = null;
     private streamWindowEnd: number | null = null;
     private streamRefreshPending = false;
     private bufferingWasPlaying = false;
@@ -457,6 +484,8 @@
 
       const sourceLanguage = runState.sourceLanguage;
       const targetLanguage = runState.targetLanguage;
+      const voiceGender = runState.voiceGender;
+      const voicePitch = runState.voicePitch;
       const tracks = chooseCaptionTracks(playerResponse, sourceLanguage);
       if (tracks.length === 0 && !hasInnertubeTranscriptFallback(playerResponse)) {
         showStatus(localizedMessage("captionsUnavailableError"), "error");
@@ -487,7 +516,14 @@
       if (this.scheduler === null) {
         this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
       }
-      this.openStream(videoId, playbackTranscript, sourceLanguage, targetLanguage);
+      this.openStream(
+        videoId,
+        playbackTranscript,
+        sourceLanguage,
+        targetLanguage,
+        voiceGender,
+        voicePitch,
+      );
     }
 
     private scheduleAdRetry(): void {
@@ -551,6 +587,8 @@
       transcript: TranscriptItem[],
       sourceLanguage: string,
       targetLanguage: string,
+      voiceGender: VoiceGender,
+      voicePitch: VoicePitch,
     ): void {
       const port = chrome.runtime.connect({ name: STREAM_PORT_NAME });
       this.port = port;
@@ -567,6 +605,8 @@
         platform: "youtube",
         sourceLanguage,
         targetLanguage,
+        voiceGender,
+        voicePitch,
         transcript,
       };
       port.postMessage({ type: "startStream", ...request });
@@ -578,6 +618,7 @@
       }
       if (message.type === "streamError") {
         const error = typeof message.error === "string" ? message.error : "Stream error";
+        this.clearBufferGuard();
         this.resumeAfterBuffering();
         this.restoreMutedState();
         showStatus(error, "error");
@@ -585,6 +626,7 @@
       }
       if (message.type === "streamClosed") {
         if (message.code !== 1000) {
+          this.clearBufferGuard();
           this.resumeAfterBuffering();
           this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
@@ -596,6 +638,7 @@
       }
       if (message.type === "streamOpen") {
         this.muteCurrentVideo();
+        this.startBufferGuard();
         if (this.shouldPauseForInitialBuffering()) {
           this.pauseForInitialBuffering();
         }
@@ -709,6 +752,7 @@
         this.scheduler = null;
       }
       this.clearStreamRestart();
+      this.clearBufferGuard();
       this.bufferingWasPlaying = false;
       this.bufferingStartedAt = 0;
       this.translatedAudioReady = false;
@@ -803,15 +847,63 @@
         performance.now() - this.bufferingStartedAt >= INITIAL_AUDIO_BUFFER_MAX_WAIT_MS;
       return bufferedAhead >= INITIAL_AUDIO_BUFFER_SECONDS || waitedLongEnough;
     }
+
+    private startBufferGuard(): void {
+      if (this.bufferGuardTimer !== null) {
+        return;
+      }
+      this.bufferGuardTimer = window.setInterval(() => {
+        this.checkBufferGuard();
+      }, BUFFER_GUARD_INTERVAL_MS);
+    }
+
+    private clearBufferGuard(): void {
+      if (this.bufferGuardTimer !== null) {
+        window.clearInterval(this.bufferGuardTimer);
+        this.bufferGuardTimer = null;
+      }
+    }
+
+    private checkBufferGuard(): void {
+      const scheduler = this.scheduler;
+      const video = this.currentVideo;
+      if (scheduler === null || video === null || !this.translatedAudioReady) {
+        return;
+      }
+      if (!scheduler.isAudioRunning()) {
+        return;
+      }
+      if (this.bufferingStartedAt > 0) {
+        if (this.canResumeBufferedPlayback()) {
+          this.resumeAfterBuffering();
+          this.showAudioReadyStatus();
+        } else {
+          this.showBufferingStatus();
+        }
+        return;
+      }
+      if (video.paused || video.ended) {
+        return;
+      }
+      if (
+        this.streamWindowEnd !== null &&
+        this.streamWindowEnd - video.currentTime <= BUFFER_UNDERRUN_GUARD_SECONDS
+      ) {
+        return;
+      }
+      const bufferedAhead = scheduler.getBufferedAheadSeconds(video.currentTime);
+      if (bufferedAhead < BUFFER_UNDERRUN_GUARD_SECONDS) {
+        this.pauseForInitialBuffering();
+        this.showBufferingStatus();
+      }
+    }
   }
 
-  async function getRunState(): Promise<
-    Required<Pick<RunStateResponse, "enabled" | "configured" | "sourceLanguage" | "targetLanguage">>
-  > {
+  async function getRunState(): Promise<RunState> {
     try {
       const response = (await chrome.runtime.sendMessage({ type: "getRunState" })) as RunStateResponse;
       if (!response.ok) {
-        return { enabled: false, configured: false, sourceLanguage: "en", targetLanguage: "de" };
+        return defaultRunState();
       }
       return {
         enabled: response.enabled === true,
@@ -824,10 +916,34 @@
           typeof response.targetLanguage === "string" && response.targetLanguage.length > 0
             ? response.targetLanguage
             : "de",
+        voiceGender: parseVoiceGender(response.voiceGender),
+        voicePitch: parseVoicePitch(response.voicePitch),
       };
     } catch {
-      return { enabled: false, configured: false, sourceLanguage: "en", targetLanguage: "de" };
+      return defaultRunState();
     }
+  }
+
+  function defaultRunState(): RunState {
+    return {
+      enabled: false,
+      configured: false,
+      sourceLanguage: "en",
+      targetLanguage: "de",
+      voiceGender: "male",
+      voicePitch: "normal",
+    };
+  }
+
+  function parseVoiceGender(value: unknown): VoiceGender {
+    return value === "female" ? "female" : "male";
+  }
+
+  function parseVoicePitch(value: unknown): VoicePitch {
+    if (value === "high" || value === "low") {
+      return value;
+    }
+    return "normal";
   }
 
   function showStatus(message: string, kind: "info" | "error", actions: StatusAction[] = []): void {

@@ -15,7 +15,12 @@ import {
     autoTranslate?: boolean;
     sourceLanguage?: string;
     targetLanguage?: string;
+    voiceGender?: VoiceGender;
+    voicePitch?: VoicePitch;
   }
+
+  type VoiceGender = "male" | "female";
+  type VoicePitch = "normal" | "high" | "low";
 
   const CONFIG_KEYS = [
     "authToken",
@@ -23,6 +28,8 @@ import {
     "autoTranslate",
     "sourceLanguage",
     "targetLanguage",
+    "voiceGender",
+    "voicePitch",
   ] as const;
 
   const LANGUAGE_CODES: readonly string[] = [
@@ -77,6 +84,14 @@ import {
     storageUnavailableError: "Chrome extension storage is unavailable in this context.",
     targetLanguageLabel: "To",
     tokenRequiredError: "Backend access token is required when automatic translation is enabled.",
+    voiceGenderFemale: "Female",
+    voiceGenderLabel: "Voice gender",
+    voiceGenderMale: "Male",
+    voicePitchHigh: "High",
+    voicePitchLabel: "Pitch",
+    voicePitchLow: "Low",
+    voicePitchNormal: "Normal",
+    voiceSection: "Voice",
   };
 
   const form = requireElement("#options-form", HTMLFormElement);
@@ -85,6 +100,8 @@ import {
   const tokenInput = requireElement("#auth-token", HTMLInputElement);
   const sourceLanguageInput = requireElement("#source-language", HTMLSelectElement);
   const targetLanguageInput = requireElement("#target-language", HTMLSelectElement);
+  const voiceGenderInput = requireElement("#voice-gender", HTMLSelectElement);
+  const voicePitchInput = requireElement("#voice-pitch", HTMLSelectElement);
   const autoTranslateInput = requireElement("#auto-translate", HTMLInputElement);
   const revealButton = requireElement("#reveal-token", HTMLButtonElement);
   const status = requireElement("#status", HTMLParagraphElement);
@@ -117,11 +134,15 @@ import {
       typeof config.sourceLanguage === "string" ? config.sourceLanguage : "en";
     const targetLanguage =
       typeof config.targetLanguage === "string" ? config.targetLanguage : "de";
+    const voiceGender = parseVoiceGender(config.voiceGender);
+    const voicePitch = parseVoicePitch(config.voicePitch);
     backendInput.value = resolveBackendWssUrl(config.backendWssUrl);
     tokenInput.value = resolveBackendAccessToken(config.authToken);
     autoTranslateInput.checked = config.autoTranslate === true;
     populateLanguageSelect(sourceLanguageInput, sourceLanguage);
     populateLanguageSelect(targetLanguageInput, targetLanguage);
+    voiceGenderInput.value = voiceGender;
+    voicePitchInput.value = voicePitch;
     await setConfigStatus(message("configurationLoadedStatus"), "ok");
   }
 
@@ -136,6 +157,8 @@ import {
     const autoTranslate = autoTranslateInput.checked;
     const sourceLanguage = sourceLanguageInput.value;
     const targetLanguage = targetLanguageInput.value;
+    const voiceGender = parseVoiceGender(voiceGenderInput.value);
+    const voicePitch = parseVoicePitch(voicePitchInput.value);
     try {
       if (backendWssUrl.length > 0 || autoTranslate) {
         assertWssUrl(backendWssUrl);
@@ -149,6 +172,8 @@ import {
         autoTranslate,
         sourceLanguage,
         targetLanguage,
+        voiceGender,
+        voicePitch,
       });
       await notifyActiveYouTubeTab();
       await setConfigStatus(message("savedStatus"), "ok");
@@ -225,6 +250,17 @@ import {
       // Intl.DisplayNames can be unavailable in non-Chrome preview contexts.
     }
     return languageCode.toUpperCase();
+  }
+
+  function parseVoiceGender(value: unknown): VoiceGender {
+    return value === "female" ? "female" : "male";
+  }
+
+  function parseVoicePitch(value: unknown): VoicePitch {
+    if (value === "high" || value === "low") {
+      return value;
+    }
+    return "normal";
   }
 
   function assertWssUrl(value: string): void {

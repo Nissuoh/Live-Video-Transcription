@@ -424,6 +424,8 @@ class OpenAITTS(TTSProvider):
         *,
         target_duration_seconds: float,
         target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
     ) -> TTSResult:
         estimated_seconds = _estimated_speech_seconds(
             text,
@@ -437,6 +439,9 @@ class OpenAITTS(TTSProvider):
             model=self._settings.openai_tts_model,
             text=text,
             speed=speed,
+            voice=self._openai_voice(voice_gender),
+            voice_gender=voice_gender,
+            voice_pitch=voice_pitch,
             include_instructions=True,
         )
         if _should_retry_openai_tts_with_legacy_model(response, self._settings.openai_tts_model):
@@ -444,6 +449,9 @@ class OpenAITTS(TTSProvider):
                 model="tts-1",
                 text=text,
                 speed=speed,
+                voice=self._openai_voice(voice_gender),
+                voice_gender=voice_gender,
+                voice_pitch=voice_pitch,
                 include_instructions=False,
             )
         await _raise_for_provider_error("OpenAI TTS", response)
@@ -459,16 +467,19 @@ class OpenAITTS(TTSProvider):
         model: str,
         text: str,
         speed: float,
+        voice: str,
+        voice_gender: str,
+        voice_pitch: str,
         include_instructions: bool,
     ) -> httpx.Response:
         body: dict[str, Any] = {
             "model": model,
-            "voice": self._settings.openai_tts_voice,
+            "voice": voice,
             "input": text,
             "response_format": self._settings.openai_tts_response_format,
             "speed": speed,
         }
-        instructions = self._settings.openai_tts_instructions.strip()
+        instructions = self._voice_instructions(voice_gender, voice_pitch)
         if include_instructions and instructions and not model.startswith("tts-1"):
             body["instructions"] = instructions
 
@@ -481,6 +492,22 @@ class OpenAITTS(TTSProvider):
             json=body,
             timeout=self._settings.provider_timeout_seconds,
         )
+
+    def _openai_voice(self, voice_gender: str) -> str:
+        if voice_gender == "male":
+            return self._settings.openai_tts_male_voice or self._settings.openai_tts_voice
+        if voice_gender == "female":
+            return self._settings.openai_tts_female_voice or self._settings.openai_tts_voice
+        return self._settings.openai_tts_voice
+
+    def _voice_instructions(self, voice_gender: str, voice_pitch: str) -> str:
+        parts = [self._settings.openai_tts_instructions.strip()]
+        parts.append("Nutze eine maennliche Stimme." if voice_gender == "male" else "Nutze eine weibliche Stimme.")
+        if voice_pitch == "low":
+            parts.append("Sprich mit tieferer Tonlage.")
+        elif voice_pitch == "high":
+            parts.append("Sprich mit hoeherer Tonlage.")
+        return " ".join(part for part in parts if part)
 
 
 class ElevenLabsTTS(TTSProvider):
@@ -497,6 +524,8 @@ class ElevenLabsTTS(TTSProvider):
         *,
         target_duration_seconds: float,
         target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
     ) -> TTSResult:
         voice_id = self._settings.elevenlabs_voice_id
         assert voice_id is not None
@@ -549,8 +578,15 @@ class WindowsSapiTTS(TTSProvider):
         *,
         target_duration_seconds: float,
         target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
     ) -> TTSResult:
-        audio_bytes = await self._synthesize_wav(text, target_language=target_language)
+        audio_bytes = await self._synthesize_wav(
+            text,
+            target_language=target_language,
+            voice_gender=voice_gender,
+            voice_pitch=voice_pitch,
+        )
         estimated_seconds = _estimated_speech_seconds(
             text,
             self._settings.duration_guard_chars_per_second,
@@ -565,7 +601,14 @@ class WindowsSapiTTS(TTSProvider):
             suggested_playback_rate=suggested_rate,
         )
 
-    async def _synthesize_wav(self, text: str, *, target_language: str) -> bytes:
+    async def _synthesize_wav(
+        self,
+        text: str,
+        *,
+        target_language: str,
+        voice_gender: str,
+        voice_pitch: str,
+    ) -> bytes:
         output = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         output_path = output.name
         output.close()
@@ -582,6 +625,7 @@ param(
   [string]$VoiceName,
   [string]$PreferredGender,
   [string]$CulturePrefix,
+  [string]$Pitch,
   [int]$Rate
 )
 $ErrorActionPreference = "Stop"
@@ -616,7 +660,19 @@ try {
   }
   $synth.Rate = $Rate
   $synth.SetOutputToWaveFile($OutputPath)
-  $synth.Speak($Text)
+  if ($Pitch -and $Pitch -ne "default") {
+    $escaped = [System.Security.SecurityElement]::Escape($Text)
+    $culture = $synth.Voice.Culture.Name
+    if (-not $culture) { $culture = "de-DE" }
+    $ssml = "<speak version='1.0' xml:lang='$culture'><voice name='$($synth.Voice.Name)'><prosody pitch='$Pitch'>$escaped</prosody></voice></speak>"
+    try {
+      $synth.SpeakSsml($ssml)
+    } catch {
+      $synth.Speak($Text)
+    }
+  } else {
+    $synth.Speak($Text)
+  }
 } finally {
   $synth.Dispose()
 }
@@ -639,9 +695,11 @@ try {
                 "-VoiceName",
                 self._settings.windows_sapi_voice or "",
                 "-PreferredGender",
-                self._sapi_gender(),
+                self._sapi_gender(voice_gender),
                 "-CulturePrefix",
                 _primary_language_subtag(target_language, "de"),
+                "-Pitch",
+                self._sapi_pitch(voice_pitch),
                 "-Rate",
                 str(self._settings.windows_sapi_rate),
                 stdout=asyncio.subprocess.PIPE,
@@ -672,8 +730,8 @@ try {
             except OSError:
                 pass
 
-    def _sapi_gender(self) -> str:
-        gender = self._settings.windows_sapi_gender
+    def _sapi_gender(self, voice_gender: str) -> str:
+        gender = voice_gender or self._settings.windows_sapi_gender
         if gender == "male":
             return "Male"
         if gender == "female":
@@ -681,6 +739,13 @@ try {
         if gender == "neutral":
             return "Neutral"
         return "Any"
+
+    def _sapi_pitch(self, voice_pitch: str) -> str:
+        if voice_pitch == "high":
+            return "+18%"
+        if voice_pitch == "low":
+            return "-18%"
+        return "default"
 
 
 def build_translation_provider(

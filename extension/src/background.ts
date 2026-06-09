@@ -20,6 +20,8 @@ import {
     platform: Platform;
     sourceLanguage: string;
     targetLanguage: string;
+    voiceGender: VoiceGender;
+    voicePitch: VoicePitch;
     transcript: TranscriptItem[];
   }
 
@@ -35,6 +37,8 @@ import {
     token: string;
     sourceLanguage: string;
     targetLanguage: string;
+    voiceGender: VoiceGender;
+    voicePitch: VoicePitch;
     transcript: TranscriptItem[];
   }
 
@@ -51,7 +55,12 @@ import {
     autoTranslate?: boolean;
     sourceLanguage?: string;
     targetLanguage?: string;
+    voiceGender?: VoiceGender;
+    voicePitch?: VoicePitch;
   }
+
+  type VoiceGender = "male" | "female";
+  type VoicePitch = "normal" | "high" | "low";
 
   interface StreamSession {
     socket: WebSocket;
@@ -65,6 +74,8 @@ import {
     "autoTranslate",
     "sourceLanguage",
     "targetLanguage",
+    "voiceGender",
+    "voicePitch",
   ] as const;
   const STREAM_PORT_NAME = "translation-stream";
   const KEEPALIVE_INTERVAL_MS = 20_000;
@@ -104,6 +115,12 @@ import {
     }
     if (typeof existing.targetLanguage !== "string") {
       defaults.targetLanguage = "de";
+    }
+    if (typeof existing.voiceGender !== "string") {
+      defaults.voiceGender = "male";
+    }
+    if (typeof existing.voicePitch !== "string") {
+      defaults.voicePitch = "normal";
     }
     if (Object.keys(defaults).length > 0) {
       await chrome.storage.local.set(defaults);
@@ -172,12 +189,16 @@ import {
       typeof config.targetLanguage === "string" && config.targetLanguage.trim().length > 0
         ? config.targetLanguage.trim()
         : "de";
+    const voiceGender = parseVoiceGender(config.voiceGender);
+    const voicePitch = parseVoicePitch(config.voicePitch);
     return {
       ok: true,
       enabled,
       configured: enabled && authToken.length > 0 && isAllowedBackendStreamUrl(backendWssUrl),
       sourceLanguage,
       targetLanguage,
+      voiceGender,
+      voicePitch,
     };
   }
 
@@ -223,6 +244,8 @@ import {
         token: config.authToken,
         sourceLanguage: config.sourceLanguage,
         targetLanguage: config.targetLanguage,
+        voiceGender: config.voiceGender,
+        voicePitch: config.voicePitch,
         transcript: normalizeTranscript(message.transcript),
       };
       socket.send(JSON.stringify(request));
@@ -301,12 +324,16 @@ import {
       typeof stored.sourceLanguage === "string" ? stored.sourceLanguage.trim() : "en";
     const targetLanguage =
       typeof stored.targetLanguage === "string" ? stored.targetLanguage.trim() : "de";
+    const voiceGender = parseVoiceGender(stored.voiceGender);
+    const voicePitch = parseVoicePitch(stored.voicePitch);
     return {
       authToken,
       backendWssUrl,
       autoTranslate: true,
       sourceLanguage: sourceLanguage || "en",
       targetLanguage: targetLanguage || "de",
+      voiceGender,
+      voicePitch,
     };
   }
 
@@ -315,6 +342,8 @@ import {
     const platform = value.platform;
     const sourceLanguage = value.sourceLanguage;
     const targetLanguage = value.targetLanguage;
+    const voiceGender = value.voiceGender;
+    const voicePitch = value.voicePitch;
     const transcript = value.transcript;
     if (
       typeof videoId !== "string" ||
@@ -322,6 +351,8 @@ import {
       platform !== "youtube" ||
       typeof sourceLanguage !== "string" ||
       typeof targetLanguage !== "string" ||
+      (voiceGender !== "male" && voiceGender !== "female") ||
+      (voicePitch !== "normal" && voicePitch !== "high" && voicePitch !== "low") ||
       !Array.isArray(transcript)
     ) {
       throw new Error("Invalid startStream message");
@@ -332,6 +363,8 @@ import {
       platform,
       sourceLanguage,
       targetLanguage,
+      voiceGender,
+      voicePitch,
       transcript: transcript.map(parseTranscriptItem),
     };
   }
@@ -390,6 +423,17 @@ import {
     if (!isAllowedBackendStreamUrl(value)) {
       throw new Error(localizedMessage("backendUrlInvalidError"));
     }
+  }
+
+  function parseVoiceGender(value: unknown): VoiceGender {
+    return value === "female" ? "female" : "male";
+  }
+
+  function parseVoicePitch(value: unknown): VoicePitch {
+    if (value === "high" || value === "low") {
+      return value;
+    }
+    return "normal";
   }
 
   function isTrustedYouTubeSender(sender: chrome.runtime.MessageSender | undefined): boolean {

@@ -47,6 +47,30 @@
   "targetLanguageLabel": {
     "message": "Nach"
   },
+  "voiceSection": {
+    "message": "Stimme"
+  },
+  "voiceGenderLabel": {
+    "message": "Stimmtyp"
+  },
+  "voiceGenderMale": {
+    "message": "Maennlich"
+  },
+  "voiceGenderFemale": {
+    "message": "Weiblich"
+  },
+  "voicePitchLabel": {
+    "message": "Tonhoehe"
+  },
+  "voicePitchNormal": {
+    "message": "Normal"
+  },
+  "voicePitchLow": {
+    "message": "Tief"
+  },
+  "voicePitchHigh": {
+    "message": "Hoch"
+  },
   "autoTranslateLabel": {
     "message": "Automatische Uebersetzung auf YouTube aktivieren"
   },

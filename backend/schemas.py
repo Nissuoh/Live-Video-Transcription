@@ -29,6 +29,8 @@ class StreamRequest(BaseModel):
     token: str = Field(min_length=1, max_length=4096)
     source_language: str = Field(default="en", alias="sourceLanguage", min_length=2, max_length=16)
     target_language: str = Field(default="de", alias="targetLanguage", min_length=2, max_length=16)
+    voice_gender: Literal["male", "female"] = Field(default="male", alias="voiceGender")
+    voice_pitch: Literal["normal", "high", "low"] = Field(default="normal", alias="voicePitch")
     transcript: list[TranscriptItem] = Field(min_length=1)
 
     @field_validator("source_language", "target_language")

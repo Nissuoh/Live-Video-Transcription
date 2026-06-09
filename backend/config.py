@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     openai_translation_model: str = "gpt-4o-mini"
     openai_tts_model: str = "gpt-4o-mini-tts"
     openai_tts_voice: str = "coral"
+    openai_tts_male_voice: str = "onyx"
+    openai_tts_female_voice: str = "coral"
     openai_tts_response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     openai_tts_instructions: str = (
         "Sprich klares, natuerliches Deutsch mit ruhiger Synchronisationsgeschwindigkeit."
