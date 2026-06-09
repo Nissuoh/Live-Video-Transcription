@@ -83,6 +83,8 @@
   const STALE_CHUNK_SECONDS = 30;
   const AD_RETRY_DELAY_MS = 1000;
   const STATUS_COPY_RESET_MS = 1600;
+  const TRANSCRIPT_PANEL_WAIT_MS = 12000;
+  const TRANSCRIPT_PANEL_POLL_MS = 250;
   const STREAM_PORT_NAME = "translation-stream";
   const FALLBACK_MESSAGES: Record<string, string> = {
     adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
@@ -913,6 +915,7 @@
     playerResponse: YouTubePlayerResponse,
   ): Promise<TranscriptItem[]> {
     let trackError: Error | null = null;
+    let innertubeError: Error | null = null;
     if (tracks.length > 0) {
       try {
         return await fetchTranscriptFromTracks(tracks);
@@ -928,20 +931,29 @@
           return transcript;
         }
       } catch (error: unknown) {
-        const fallbackError = normalizeError(error);
-        if (trackError !== null) {
-          throw new Error(
-            `${trackError.message}; innertube transcript fallback failed: ${fallbackError.message}`,
-          );
-        }
-        throw fallbackError;
+        innertubeError = normalizeError(error);
       }
     }
 
-    if (trackError !== null) {
-      throw trackError;
+    let domError: Error | null = null;
+    try {
+      const transcript = await fetchTranscriptFromYouTubeDomPanel();
+      if (transcript.length > 0) {
+        return transcript;
+      }
+      domError = new Error("YouTube transcript panel did not expose transcript segments");
+    } catch (error: unknown) {
+      domError = normalizeError(error);
     }
-    return [];
+
+    const errors = [
+      trackError?.message,
+      innertubeError !== null
+        ? `innertube transcript fallback failed: ${innertubeError.message}`
+        : null,
+      domError !== null ? `DOM transcript fallback failed: ${domError.message}` : null,
+    ].filter((message): message is string => message !== null && message !== undefined);
+    throw new Error(errors.join("; ") || "No YouTube transcript source returned segments");
   }
 
   function hasInnertubeTranscriptFallback(
@@ -1050,6 +1062,188 @@
       headers["X-Goog-Visitor-Id"] = client.visitorData;
     }
     return headers;
+  }
+
+  async function fetchTranscriptFromYouTubeDomPanel(): Promise<TranscriptItem[]> {
+    const existingTranscript = parseTranscriptFromDom();
+    if (existingTranscript.length > 0) {
+      return existingTranscript;
+    }
+
+    await openYouTubeTranscriptPanel();
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < TRANSCRIPT_PANEL_WAIT_MS) {
+      const transcript = parseTranscriptFromDom();
+      if (transcript.length > 0) {
+        return transcript;
+      }
+      await delay(TRANSCRIPT_PANEL_POLL_MS);
+    }
+    throw new Error("Timed out waiting for YouTube transcript panel segments");
+  }
+
+  async function openYouTubeTranscriptPanel(): Promise<void> {
+    expandYouTubeDescription();
+    await delay(300);
+
+    const existingPanel = getTranscriptPanelElement();
+    if (existingPanel !== null) {
+      existingPanel.removeAttribute("hidden");
+      existingPanel.setAttribute("visibility", "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED");
+    }
+
+    const transcriptButton = findTranscriptButton();
+    if (transcriptButton === null) {
+      throw new Error("Could not find YouTube transcript button");
+    }
+    clickElement(transcriptButton);
+  }
+
+  function expandYouTubeDescription(): void {
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        [
+          "ytd-watch-metadata tp-yt-paper-button#expand",
+          "ytd-watch-metadata button[aria-label]",
+          "#description tp-yt-paper-button#expand",
+          "#description button[aria-label]",
+          "button",
+          "tp-yt-paper-button",
+        ].join(","),
+      ),
+    );
+    const expandButton = candidates.find((element) => {
+      if (!isVisibleElement(element)) {
+        return false;
+      }
+      const label = getElementSearchText(element);
+      return /\b(more|show more|mehr|mehr anzeigen|weiterlesen)\b/i.test(label);
+    });
+    if (expandButton !== undefined) {
+      clickElement(expandButton);
+    }
+  }
+
+  function findTranscriptButton(): HTMLElement | null {
+    const transcriptPattern =
+      /(show transcript|open transcript|transcript anzeigen|transkript anzeigen|transkript|transcript|transcription|transcripción|transcrição|transcriptie|trascrizione|transkription|文字起こし)/i;
+    const blockedPattern =
+      /(close|hide|schlie|ausblenden|fermer|cerrar|chiudi|sluiten|閉じる)/i;
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        [
+          "button",
+          "yt-button-shape button",
+          "ytd-button-renderer",
+          "tp-yt-paper-button",
+          "a[role='button']",
+          "[role='button']",
+        ].join(","),
+      ),
+    );
+    return (
+      candidates.find((element) => {
+        if (!isVisibleElement(element)) {
+          return false;
+        }
+        const label = getElementSearchText(element);
+        return transcriptPattern.test(label) && !blockedPattern.test(label);
+      }) ?? null
+    );
+  }
+
+  function getTranscriptPanelElement(): HTMLElement | null {
+    const panel = document.querySelector(
+      [
+        'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]',
+        'ytd-engagement-panel-section-list-renderer[targetid="engagement-panel-searchable-transcript"]',
+        'ytd-engagement-panel-section-list-renderer[panel-identifier="engagement-panel-searchable-transcript"]',
+      ].join(","),
+    );
+    return panel instanceof HTMLElement ? panel : null;
+  }
+
+  function parseTranscriptFromDom(): TranscriptItem[] {
+    const segmentElements = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        [
+          "ytd-transcript-segment-renderer",
+          "yt-transcript-segment-renderer",
+          "[class*='transcript-segment']",
+        ].join(","),
+      ),
+    ).filter(isVisibleElement);
+
+    const transcript = segmentElements
+      .map(parseDomTranscriptSegment)
+      .filter((item): item is TranscriptItem => item !== null);
+    return normalizeTranscriptDurations(transcript);
+  }
+
+  function parseDomTranscriptSegment(element: HTMLElement): TranscriptItem | null {
+    const timestampElement =
+      element.querySelector<HTMLElement>(
+        ".segment-timestamp, .segment-start-offset, [class*='timestamp'], [class*='start-offset']",
+      ) ?? null;
+    const timestampText = normalizeCaptionText(timestampElement?.textContent ?? "");
+    const start = parseTimestampText(timestampText);
+    if (!Number.isFinite(start) || start < 0) {
+      return null;
+    }
+
+    const explicitTextElement =
+      element.querySelector<HTMLElement>(
+        ".segment-text, yt-formatted-string.segment-text, [class*='segment-text']",
+      ) ?? null;
+    const rawText = normalizeCaptionText(
+      explicitTextElement?.textContent ?? element.textContent ?? "",
+    );
+    const text = normalizeCaptionText(
+      rawText.startsWith(timestampText) ? rawText.slice(timestampText.length) : rawText,
+    );
+    if (text.length === 0) {
+      return null;
+    }
+    return { start, duration: 0, text };
+  }
+
+  function clickElement(element: HTMLElement): void {
+    element.click();
+    element.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }),
+    );
+  }
+
+  function isVisibleElement(element: HTMLElement): boolean {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.opacity !== "0"
+    );
+  }
+
+  function getElementSearchText(element: HTMLElement): string {
+    return normalizeCaptionText(
+      [
+        element.textContent ?? "",
+        element.getAttribute("aria-label") ?? "",
+        element.getAttribute("title") ?? "",
+      ].join(" "),
+    );
+  }
+
+  function delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, milliseconds);
+    });
   }
 
   async function fetchTranscript(track: CaptionTrack): Promise<TranscriptItem[]> {
