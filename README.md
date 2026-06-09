@@ -192,6 +192,8 @@ OPENAI_API_KEY=sk-...
 TTS_PROVIDER=edge_tts
 ```
 
+For low-tier OpenAI projects, keep `MAX_CHUNK_CONCURRENCY=1` and the default provider retry settings. The backend respects OpenAI retry hints and waits instead of closing the stream on temporary `429 Too Many Requests` responses.
+
 3. Start the backend:
 
 ```powershell

@@ -91,6 +91,12 @@ The popup, options UI, and YouTube status overlay store `uiLanguage` separately 
 
 YouTube playback speed and translated speech speed stay synchronized. With `preserveVoicePitch=true`, the content script uses Chrome's native pitch-preserving media playback for sped-up translated chunks. This keeps a low or male voice from becoming artificially high or robotic at 1.25x, 1.5x, or 2x playback speed.
 
+The content script refreshes transcript windows using the active YouTube playback rate. At 1.5x or 2x it requests the next backend stream earlier, so the translated audio buffer does not run out just because video time advances faster than real time.
+
+## Provider Rate Limits
+
+Some OpenAI projects have low request-per-minute limits. The backend parses provider retry hints such as "try again in 12s" and backs off instead of closing the WebSocket stream immediately. For smoother local testing with low RPM limits, keep `MAX_CHUNK_CONCURRENCY=1`, use the default retry settings, and avoid repeatedly restarting the same video while the backend is already processing a stream.
+
 ## Gemini 3.5 Live Translate Evaluation
 
 Google documents `gemini-3.5-live-translate-preview` as a low-latency audio-to-audio Live API translation model with 70+ supported languages. It is relevant for a V2 architecture, but it is not compatible with the current V1 contract as a simple provider swap:

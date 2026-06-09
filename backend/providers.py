@@ -4,6 +4,7 @@ import asyncio
 import io
 import math
 import os
+import re
 import shutil
 import tempfile
 import wave
@@ -23,6 +24,12 @@ class ProviderConfigurationError(RuntimeError):
 
 class ProviderRequestError(RuntimeError):
     pass
+
+
+_RETRY_AFTER_TEXT_RE = re.compile(
+    r"(?:try|retry)\s+again\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*(milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m)?",
+    re.IGNORECASE,
+)
 
 
 def _secret_value(value: Any, name: str) -> str:
@@ -233,14 +240,43 @@ def _retry_delay_seconds(
     settings: Settings,
     attempt: int,
 ) -> float:
+    max_delay = settings.provider_retry_max_delay_seconds
     if response is not None and response.status_code == 429:
         retry_after = response.headers.get("Retry-After")
         if retry_after is not None:
             try:
-                return max(0.5, min(30.0, float(retry_after)))
+                return max(0.5, min(max_delay, float(retry_after)))
             except ValueError:
                 pass
-    return settings.provider_retry_base_delay_seconds * (2**attempt)
+        body_delay = _retry_delay_from_response_body(response)
+        if body_delay is not None:
+            return max(0.5, min(max_delay, body_delay + 0.5))
+    return min(max_delay, settings.provider_retry_base_delay_seconds * (2**attempt))
+
+
+def _retry_delay_from_response_body(response: httpx.Response) -> float | None:
+    try:
+        payload = response.json()
+    except ValueError:
+        message = response.text
+    else:
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            message = error["message"]
+        else:
+            message = response.text
+
+    match = _RETRY_AFTER_TEXT_RE.search(message)
+    if match is None:
+        return None
+
+    value = float(match.group(1))
+    unit = (match.group(2) or "s").lower()
+    if unit.startswith("ms") or unit.startswith("millisecond"):
+        return value / 1000
+    if unit.startswith("m") and not unit.startswith("ms"):
+        return value * 60
+    return value
 
 
 async def _post_with_retries(

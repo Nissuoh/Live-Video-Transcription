@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     max_transcript_items: int = Field(default=2000, ge=1, le=20000)
     max_text_chars_per_chunk: int = Field(default=4000, ge=1, le=20000)
     provider_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
-    provider_max_retries: int = Field(default=4, ge=0, le=5)
+    provider_max_retries: int = Field(default=8, ge=0, le=20)
     provider_retry_base_delay_seconds: float = Field(default=1.0, gt=0, le=10)
+    provider_retry_max_delay_seconds: float = Field(default=90.0, gt=0, le=300)
     rate_limit_connections_per_minute: int = Field(default=30, ge=1, le=10000)
     rate_limit_chunks_per_minute: int = Field(default=3000, ge=1, le=100000)
 

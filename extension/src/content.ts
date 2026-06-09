@@ -280,6 +280,12 @@
       this.video.removeEventListener("ratechange", this.onRateChanged);
     }
 
+    resetQueue(): void {
+      this.stopActiveSources();
+      this.clearChunks();
+      this.scheduledKeys.clear();
+    }
+
     private readonly onPlaybackResumed = (): void => {
       void this.unlockAudio().catch((error: unknown) => {
         console.warn("[Live Video Translation] AudioContext resume failed", error);
@@ -558,6 +564,7 @@
     private bufferingWasPlaying = false;
     private bufferingStartedAt = 0;
     private translatedAudioReady = false;
+    private observedVideo: HTMLVideoElement | null = null;
 
     start(): void {
       this.queueBootstrap();
@@ -639,6 +646,7 @@
         this.teardown();
         this.currentVideo = video;
       }
+      this.attachVideoRuntimeListeners(video);
 
       const sourceLanguage = runState.sourceLanguage;
       const targetLanguage = runState.targetLanguage;
@@ -719,9 +727,10 @@
         return;
       }
       const secondsUntilRefresh = windowEnd - video.currentTime - STREAM_REFRESH_MARGIN_SECONDS;
+      const playbackRate = Math.max(0.25, Math.abs(video.playbackRate || 1));
       const delayMs = Math.max(
         STREAM_RESTART_MIN_DELAY_MS,
-        Math.min(STREAM_RESTART_MAX_DELAY_MS, secondsUntilRefresh * 1000),
+        Math.min(STREAM_RESTART_MAX_DELAY_MS, (secondsUntilRefresh / playbackRate) * 1000),
       );
       this.streamRestartTimer = window.setTimeout(() => {
         this.streamRestartTimer = null;
@@ -733,9 +742,16 @@
           this.scheduleStreamRestart();
           return;
         }
-        this.streamRefreshPending = true;
-        this.queueBootstrap();
+        this.requestStreamRefresh();
       }, delayMs);
+    }
+
+    private requestStreamRefresh(): void {
+      if (this.activeVideoId === null || this.streamRefreshPending) {
+        return;
+      }
+      this.streamRefreshPending = true;
+      this.queueBootstrap();
     }
 
     private clearStreamRestart(): void {
@@ -916,6 +932,7 @@
         this.scheduler.dispose();
         this.scheduler = null;
       }
+      this.detachVideoRuntimeListeners();
       this.clearStreamRestart();
       this.clearBufferGuard();
       this.bufferingWasPlaying = false;
@@ -1054,6 +1071,7 @@
         this.streamWindowEnd !== null &&
         this.streamWindowEnd - video.currentTime <= BUFFER_UNDERRUN_GUARD_SECONDS
       ) {
+        this.requestStreamRefresh();
         return;
       }
       const bufferedAhead = scheduler.getBufferedAheadSeconds(video.currentTime);
@@ -1062,6 +1080,42 @@
         this.showBufferingStatus();
       }
     }
+
+    private attachVideoRuntimeListeners(video: HTMLVideoElement): void {
+      if (this.observedVideo === video) {
+        return;
+      }
+      this.detachVideoRuntimeListeners();
+      this.observedVideo = video;
+      video.addEventListener("play", this.onVideoPlaybackResumed);
+      video.addEventListener("ratechange", this.onVideoRateChanged);
+      video.addEventListener("seeking", this.onVideoSeeking);
+    }
+
+    private detachVideoRuntimeListeners(): void {
+      if (this.observedVideo === null) {
+        return;
+      }
+      this.observedVideo.removeEventListener("play", this.onVideoPlaybackResumed);
+      this.observedVideo.removeEventListener("ratechange", this.onVideoRateChanged);
+      this.observedVideo.removeEventListener("seeking", this.onVideoSeeking);
+      this.observedVideo = null;
+    }
+
+    private readonly onVideoPlaybackResumed = (): void => {
+      this.scheduleStreamRestart();
+    };
+
+    private readonly onVideoRateChanged = (): void => {
+      this.scheduleStreamRestart();
+    };
+
+    private readonly onVideoSeeking = (): void => {
+      if (this.scheduler !== null) {
+        this.scheduler.resetQueue();
+      }
+      this.requestStreamRefresh();
+    };
   }
 
   async function getRunState(): Promise<RunState> {
