@@ -6,8 +6,12 @@ export function hasDefaultBackendWssUrl(): boolean {
 }
 
 export function resolveBackendWssUrl(storedBackendWssUrl: string | undefined): string {
+  const configuredDefault = DEFAULT_BACKEND_WSS_URL.trim();
+  if (configuredDefault.length > 0) {
+    return configuredDefault;
+  }
   const stored = typeof storedBackendWssUrl === "string" ? storedBackendWssUrl.trim() : "";
-  return stored.length > 0 ? stored : DEFAULT_BACKEND_WSS_URL.trim();
+  return stored;
 }
 
 export function isAllowedBackendStreamUrl(value: string): boolean {
