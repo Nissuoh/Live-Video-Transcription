@@ -89,6 +89,9 @@
   "connectionClosedError": {
     "message": "Live-Uebersetzungsverbindung wurde unerwartet geschlossen."
   },
+  "disabledStatus": {
+    "message": "Live Video Translation ist bereit. Oeffne die Erweiterung, trage den Token ein, aktiviere die Uebersetzung und speichere."
+  },
   "preparingAudioStatus": {
     "message": "Live-Uebersetzung bereitet Audio vor."
   },

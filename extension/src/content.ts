@@ -78,6 +78,8 @@
     captionsEmptyError: "The selected caption track is empty.",
     captionsUnavailableError: "No caption track is available for the selected language.",
     connectionClosedError: "Live translation connection closed unexpectedly.",
+    disabledStatus:
+      "Live Video Translation is ready. Open the extension, enter your token, enable translation, and save.",
     metadataError: "Could not read the current YouTube video metadata.",
     notConfiguredStatus:
       "Live translation is enabled but not configured. Open the extension popup.",
@@ -269,7 +271,7 @@
       const runState = await getRunState();
       if (!runState.enabled) {
         this.teardown();
-        hideStatus();
+        showStatus(localizedMessage("disabledStatus"), "info");
         return;
       }
       if (!runState.configured) {

@@ -89,6 +89,9 @@
   "connectionClosedError": {
     "message": "Live translation connection closed unexpectedly."
   },
+  "disabledStatus": {
+    "message": "Live Video Translation is ready. Open the extension, enter your token, enable translation, and save."
+  },
   "preparingAudioStatus": {
     "message": "Live translation is preparing audio."
   },
