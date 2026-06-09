@@ -84,8 +84,11 @@
   }
 
   const SCHEDULE_AHEAD_SECONDS = 0.2;
-  const LATE_TOLERANCE_SECONDS = 0.35;
+  const LATE_TOLERANCE_SECONDS = 2;
   const STALE_CHUNK_SECONDS = 30;
+  const TRANSCRIPT_LOOKBACK_SECONDS = 0.75;
+  const INITIAL_AUDIO_BUFFER_SECONDS = 4;
+  const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 8000;
   const AD_RETRY_DELAY_MS = 1000;
   const STATUS_COPY_RESET_MS = 1600;
   const TRANSCRIPT_PANEL_WAIT_MS = 12000;
@@ -156,6 +159,28 @@
 
     getAudioState(): AudioContextState | "not-created" {
       return this.audioContext?.state ?? "not-created";
+    }
+
+    getBufferedChunkCount(): number {
+      return this.chunks.size;
+    }
+
+    getBufferedAheadSeconds(currentTime: number): number {
+      let cursor = currentTime;
+      let bufferedSeconds = 0;
+      const chunks = Array.from(this.chunks.values()).sort((left, right) => left.start - right.start);
+      for (const chunk of chunks) {
+        if (chunk.end <= cursor) {
+          continue;
+        }
+        if (chunk.start > cursor + 0.6) {
+          break;
+        }
+        const availableStart = Math.max(cursor, chunk.start);
+        bufferedSeconds += Math.max(0, chunk.end - availableStart);
+        cursor = Math.max(cursor, chunk.end);
+      }
+      return bufferedSeconds;
     }
 
     dispose(): void {
@@ -272,12 +297,17 @@
         this.activeSources.delete(source);
       };
 
-      const offset = Math.max(0, currentTime - chunk.start);
       const startDelay = Math.max(0, chunk.start - currentTime);
       const when = context.currentTime + startDelay;
+      const audioOffset = calculateAudioOffset(chunk, currentTime);
       this.activeSources.set(source, chunk.playbackRate);
       this.scheduledKeys.add(key);
-      source.start(when, offset);
+      try {
+        source.start(when, audioOffset);
+      } catch (error: unknown) {
+        this.activeSources.delete(source);
+        console.warn("[Live Video Translation] Audio source scheduling failed", error);
+      }
     }
 
     private stopActiveSources(): void {
@@ -300,6 +330,9 @@
     private previousMuted: boolean | null = null;
     private navigationTimer: number | null = null;
     private adRetryTimer: number | null = null;
+    private bufferingWasPlaying = false;
+    private bufferingStartedAt = 0;
+    private translatedAudioReady = false;
 
     start(): void {
       this.queueBootstrap();
@@ -395,9 +428,14 @@
         showStatus(localizedMessage("captionsEmptyError"), "error");
         return;
       }
+      const playbackTranscript = transcriptFromCurrentPlayback(transcript, video.currentTime);
+      if (playbackTranscript.length === 0) {
+        showStatus(localizedMessage("captionsEmptyError"), "error");
+        return;
+      }
       this.activeVideoId = videoId;
       this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
-      this.openStream(videoId, transcript, sourceLanguage, targetLanguage);
+      this.openStream(videoId, playbackTranscript, sourceLanguage, targetLanguage);
     }
 
     private scheduleAdRetry(): void {
@@ -447,12 +485,14 @@
       }
       if (message.type === "streamError") {
         const error = typeof message.error === "string" ? message.error : "Stream error";
+        this.resumeAfterBuffering();
         this.restoreMutedState();
         showStatus(error, "error");
         return;
       }
       if (message.type === "streamClosed") {
         if (message.code !== 1000) {
+          this.resumeAfterBuffering();
           this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
           showStatus(formatStreamClosedStatus(message), "error");
@@ -461,6 +501,7 @@
       }
       if (message.type === "streamOpen") {
         this.muteCurrentVideo();
+        this.pauseForInitialBuffering();
         showStatus(localizedMessage("preparingAudioStatus"), "info");
         return;
       }
@@ -473,15 +514,22 @@
       }
       const chunk = parseStreamChunk(message.chunk);
       await scheduler.addChunk(chunk);
-      if (scheduler.isAudioRunning()) {
+      this.translatedAudioReady = true;
+      if (this.canResumeBufferedPlayback()) {
+        this.resumeAfterBuffering();
         hideStatus();
         return;
       }
-      this.showAudioUnlockStatus();
+      if (!scheduler.isAudioRunning()) {
+        this.showAudioUnlockStatus();
+        return;
+      }
+      this.showBufferingStatus();
     }
 
     private readonly onAudioStateChanged = (state: AudioContextState): void => {
-      if (state === "running") {
+      if (state === "running" && this.canResumeBufferedPlayback()) {
+        this.resumeAfterBuffering();
         hideStatus();
         return;
       }
@@ -501,14 +549,32 @@
           label: localizedMessage("enableAudioButton"),
           onClick: async () => {
             const state = await scheduler.unlockAudio();
-            if (state === "running") {
+            if (state === "running" && this.canResumeBufferedPlayback()) {
+              this.resumeAfterBuffering();
               hideStatus();
               return;
             }
-            this.showAudioUnlockStatus();
+            if (state !== "running") {
+              this.showAudioUnlockStatus();
+              return;
+            }
+            this.showBufferingStatus();
           },
         },
       ]);
+    }
+
+    private showBufferingStatus(): void {
+      const scheduler = this.scheduler;
+      const video = this.currentVideo;
+      if (scheduler === null || video === null) {
+        return;
+      }
+      const bufferedAhead = scheduler.getBufferedAheadSeconds(video.currentTime);
+      showStatus(
+        `${localizedMessage("preparingAudioStatus")} Buffer: ${bufferedAhead.toFixed(1)}s, chunks: ${scheduler.getBufferedChunkCount()}.`,
+        "info",
+      );
     }
 
     private teardown(): void {
@@ -522,6 +588,9 @@
         this.scheduler.dispose();
         this.scheduler = null;
       }
+      this.bufferingWasPlaying = false;
+      this.bufferingStartedAt = 0;
+      this.translatedAudioReady = false;
       this.restoreMutedState();
       this.currentVideo = null;
     }
@@ -541,6 +610,46 @@
         this.currentVideo.muted = this.previousMuted;
       }
       this.previousMuted = null;
+    }
+
+    private pauseForInitialBuffering(): void {
+      const video = this.currentVideo;
+      if (video === null || this.bufferingStartedAt > 0) {
+        return;
+      }
+      this.bufferingWasPlaying = !video.paused;
+      this.bufferingStartedAt = performance.now();
+      if (this.bufferingWasPlaying) {
+        video.pause();
+      }
+    }
+
+    private resumeAfterBuffering(): void {
+      const video = this.currentVideo;
+      const shouldResume = this.bufferingWasPlaying;
+      this.bufferingWasPlaying = false;
+      this.bufferingStartedAt = 0;
+      if (video !== null && shouldResume && video.paused) {
+        void video.play().catch((error: unknown) => {
+          console.warn("[Live Video Translation] Could not resume YouTube playback", error);
+        });
+      }
+    }
+
+    private canResumeBufferedPlayback(): boolean {
+      const scheduler = this.scheduler;
+      const video = this.currentVideo;
+      if (scheduler === null || video === null || !this.translatedAudioReady) {
+        return false;
+      }
+      if (!scheduler.isAudioRunning()) {
+        return false;
+      }
+      const bufferedAhead = scheduler.getBufferedAheadSeconds(video.currentTime);
+      const waitedLongEnough =
+        this.bufferingStartedAt > 0 &&
+        performance.now() - this.bufferingStartedAt >= INITIAL_AUDIO_BUFFER_MAX_WAIT_MS;
+      return bufferedAhead >= INITIAL_AUDIO_BUFFER_SECONDS || waitedLongEnough;
     }
   }
 
@@ -1755,6 +1864,26 @@
       throw new Error("Invalid stream chunk shape");
     }
     return { start, end, audioBase64, suggestedPlaybackRate };
+  }
+
+  function transcriptFromCurrentPlayback(
+    transcript: TranscriptItem[],
+    currentTime: number,
+  ): TranscriptItem[] {
+    const minimumStart = Math.max(0, currentTime - TRANSCRIPT_LOOKBACK_SECONDS);
+    return transcript.filter((item) => item.start + item.duration >= minimumStart);
+  }
+
+  function calculateAudioOffset(chunk: DecodedAudioChunk, currentTime: number): number {
+    if (currentTime <= chunk.start || chunk.buffer.duration <= 0) {
+      return 0;
+    }
+    const chunkDuration = Math.max(0.001, chunk.end - chunk.start);
+    const elapsedRatio = Math.max(0, Math.min(0.95, (currentTime - chunk.start) / chunkDuration));
+    return Math.min(
+      chunk.buffer.duration * elapsedRatio,
+      Math.max(0, chunk.buffer.duration - 0.02),
+    );
   }
 
   function base64ToArrayBuffer(value: string): ArrayBuffer {
