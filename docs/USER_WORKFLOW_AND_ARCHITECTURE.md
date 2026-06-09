@@ -15,7 +15,7 @@
 5. The user saves the settings.
 6. The content script detects the current YouTube video and caption track automatically.
 7. The extension sends caption text and timestamps to the configured backend over `wss://`.
-8. The backend translates and creates TTS audio chunks.
+8. The backend translates future transcript chunks in batches and creates TTS audio chunks.
 9. The extension mutes the original YouTube audio only after the backend stream opens.
 10. The extension plays translated speech through the browser audio output.
 
@@ -92,6 +92,8 @@ The popup, options UI, and YouTube status overlay store `uiLanguage` separately 
 YouTube playback speed and translated speech speed stay synchronized. With `preserveVoicePitch=true`, the content script uses Chrome's native pitch-preserving media playback for sped-up translated chunks. This keeps a low or male voice from becoming artificially high or robotic at 1.25x, 1.5x, or 2x playback speed.
 
 The content script refreshes transcript windows using the active YouTube playback rate. At 1.5x or 2x it requests the next backend stream earlier, so the translated audio buffer does not run out just because video time advances faster than real time.
+
+The extension now sends a larger future transcript window, up to roughly six minutes from the current playback position. The backend batches translation requests to reduce provider rate-limit pressure, then still synthesizes and streams audio per timestamped chunk so playback remains synchronized.
 
 ## Speech Naturalization
 

@@ -180,6 +180,8 @@ Source and target language labels are rendered through `Intl.DisplayNames`, so l
 
 The backend also normalizes German TTS text before speech synthesis. Years, year ranges, times, percentages, currencies, units, links, and e-mail addresses are converted into more natural spoken forms.
 
+For smooth playback, the extension sends a larger lookahead window while the backend batches translation requests. This allows the system to prepare future speech ahead of the current YouTube timestamp without losing per-chunk audio synchronization.
+
 For a public production build, set `DEFAULT_BACKEND_WSS_URL` in [extension/src/defaults.ts](extension/src/defaults.ts). Then users only enter the backend access token, choose languages and voice settings, and enable translation.
 
 ## Local End-to-End Test

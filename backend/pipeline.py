@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 
 from .config import Settings
-from .interfaces import TTSProvider, TranslationProvider
+from .interfaces import TTSProvider, TranslationInput, TranslationProvider
 from .pronunciation import normalize_tts_pronunciation
 from .schemas import StreamChunk, StreamRequest, TranscriptItem
 
@@ -26,80 +25,63 @@ class TranslationPipeline:
         self._settings = settings
 
     async def stream(self, request: StreamRequest, send_chunk: SendChunk) -> None:
-        item_count = len(request.transcript)
-        worker_count = min(self._settings.max_chunk_concurrency, item_count)
-        work_queue: asyncio.Queue[tuple[int, TranscriptItem, str, str, str] | None] = asyncio.Queue()
-        result_queue: asyncio.Queue[tuple[int, StreamChunk | None, BaseException | None]] = (
-            asyncio.Queue()
-        )
-
-        for index, item in enumerate(request.transcript):
-            work_queue.put_nowait(
-                (index, item, request.target_language, request.voice_gender, request.voice_pitch)
+        for batch in self._translation_batches(request.transcript):
+            translations = await self._translator.translate_batch(
+                [
+                    TranslationInput(text=item.text, duration_seconds=item.duration)
+                    for item in batch
+                ],
+                target_language=request.target_language,
             )
-        for _ in range(worker_count):
-            work_queue.put_nowait(None)
-
-        workers = [
-            asyncio.create_task(self._worker(work_queue, result_queue))
-            for _ in range(worker_count)
-        ]
-
-        completed = 0
-        next_index = 0
-        pending_chunks: dict[int, StreamChunk] = {}
-        try:
-            while completed < item_count:
-                index, chunk, error = await result_queue.get()
-                completed += 1
-                if error is not None:
-                    raise error
-                assert chunk is not None
-                pending_chunks[index] = chunk
-                while next_index in pending_chunks:
-                    await send_chunk(pending_chunks.pop(next_index))
-                    next_index += 1
-        finally:
-            for worker in workers:
-                if not worker.done():
-                    worker.cancel()
-            await asyncio.gather(*workers, return_exceptions=True)
-
-    async def _worker(
-        self,
-        work_queue: asyncio.Queue[tuple[int, TranscriptItem, str, str, str] | None],
-        result_queue: asyncio.Queue[tuple[int, StreamChunk | None, BaseException | None]],
-    ) -> None:
-        while True:
-            work = await work_queue.get()
-            if work is None:
-                return
-            index, item, target_language, voice_gender, voice_pitch = work
-            try:
-                chunk = await self._process_item(
+            if len(translations) != len(batch):
+                raise ValueError("translation provider returned an unexpected batch size")
+            for item, translated_text in zip(batch, translations, strict=True):
+                chunk = await self._process_translated_item(
                     item,
-                    target_language=target_language,
-                    voice_gender=voice_gender,
-                    voice_pitch=voice_pitch,
+                    translated_text=translated_text,
+                    target_language=request.target_language,
+                    voice_gender=request.voice_gender,
+                    voice_pitch=request.voice_pitch,
                 )
-            except BaseException as exc:
-                await result_queue.put((index, None, exc))
-            else:
-                await result_queue.put((index, chunk, None))
+                await send_chunk(chunk)
 
-    async def _process_item(
+    def _translation_batches(self, transcript: list[TranscriptItem]) -> list[list[TranscriptItem]]:
+        batches: list[list[TranscriptItem]] = []
+        current: list[TranscriptItem] = []
+        current_chars = 0
+        current_duration = 0.0
+
+        for item in transcript:
+            item_chars = len(item.text)
+            would_exceed = (
+                len(current) >= self._settings.translation_batch_max_items
+                or current_chars + item_chars > self._settings.translation_batch_max_chars
+                or current_duration + item.duration
+                > self._settings.translation_batch_max_duration_seconds
+            )
+            if current and would_exceed:
+                batches.append(current)
+                current = []
+                current_chars = 0
+                current_duration = 0.0
+
+            current.append(item)
+            current_chars += item_chars
+            current_duration += item.duration
+
+        if current:
+            batches.append(current)
+        return batches
+
+    async def _process_translated_item(
         self,
         item: TranscriptItem,
         *,
+        translated_text: str,
         target_language: str,
         voice_gender: str,
         voice_pitch: str,
     ) -> StreamChunk:
-        translated_text = await self._translator.translate(
-            item.text,
-            duration_seconds=item.duration,
-            target_language=target_language,
-        )
         spoken_text = normalize_tts_pronunciation(
             translated_text,
             target_language=target_language,

@@ -60,9 +60,12 @@ def _rate_limit_key(prefix: str, token: str) -> str:
     return f"{prefix}:{digest}"
 
 
-async def _drain_keepalive_messages(websocket: WebSocket) -> None:
+async def _watch_disconnect(websocket: WebSocket) -> None:
     while True:
-        await websocket.receive_text()
+        try:
+            await websocket.receive_text()
+        except WebSocketDisconnect:
+            return
 
 
 @asynccontextmanager
@@ -133,7 +136,8 @@ def create_app() -> FastAPI:
             return
 
         await websocket.accept()
-        keepalive_drain_task: asyncio.Task[None] | None = None
+        disconnect_task: asyncio.Task[None] | None = None
+        pipeline_task: asyncio.Task[None] | None = None
         try:
             payload: Any = await websocket.receive_json()
             request = StreamRequest.model_validate(payload)
@@ -155,12 +159,30 @@ def create_app() -> FastAPI:
                 await websocket.close(code=1013, reason="Chunk rate limit exceeded")
                 return
 
-            keepalive_drain_task = asyncio.create_task(_drain_keepalive_messages(websocket))
+            disconnect_task = asyncio.create_task(_watch_disconnect(websocket))
 
             async def send_chunk(chunk: StreamChunk) -> None:
-                await websocket.send_json(chunk.model_dump(by_alias=True))
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    raise WebSocketDisconnect()
+                try:
+                    await websocket.send_json(chunk.model_dump(by_alias=True))
+                except RuntimeError as exc:
+                    raise WebSocketDisconnect() from exc
 
-            await pipeline.stream(request, send_chunk)
+            pipeline_task = asyncio.create_task(pipeline.stream(request, send_chunk))
+            done, _pending = await asyncio.wait(
+                {disconnect_task, pipeline_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if disconnect_task in done:
+                pipeline_task.cancel()
+                await asyncio.gather(pipeline_task, return_exceptions=True)
+                logger.info("websocket disconnected")
+                return
+
+            disconnect_task.cancel()
+            await asyncio.gather(disconnect_task, return_exceptions=True)
+            await pipeline_task
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1000, reason="Transcript complete")
         except WebSocketDisconnect:
@@ -174,9 +196,13 @@ def create_app() -> FastAPI:
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1011, reason="Stream processing failed")
         finally:
-            if keepalive_drain_task is not None:
-                keepalive_drain_task.cancel()
-                await asyncio.gather(keepalive_drain_task, return_exceptions=True)
+            for task in (disconnect_task, pipeline_task):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (disconnect_task, pipeline_task) if task is not None),
+                return_exceptions=True,
+            )
 
     return app
 

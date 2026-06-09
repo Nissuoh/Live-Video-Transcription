@@ -115,16 +115,16 @@
   const LATE_TOLERANCE_SECONDS = 2;
   const STALE_CHUNK_SECONDS = 30;
   const TRANSCRIPT_LOOKBACK_SECONDS = 0.75;
-  const STREAM_LOOKAHEAD_SECONDS = 120;
-  const STREAM_REFRESH_MARGIN_SECONDS = 45;
+  const STREAM_LOOKAHEAD_SECONDS = 360;
+  const STREAM_REFRESH_MARGIN_SECONDS = 120;
   const STREAM_RESTART_MIN_DELAY_MS = 1500;
   const STREAM_RESTART_MAX_DELAY_MS = 30000;
   const MERGED_TRANSCRIPT_TARGET_SECONDS = 16;
   const MERGED_TRANSCRIPT_MAX_CHARS = 1600;
-  const MERGED_TRANSCRIPT_MAX_ITEMS = 8;
-  const INITIAL_AUDIO_BUFFER_SECONDS = 4;
-  const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 8000;
-  const BUFFER_UNDERRUN_GUARD_SECONDS = 0.9;
+  const MERGED_TRANSCRIPT_MAX_ITEMS = 24;
+  const INITIAL_AUDIO_BUFFER_SECONDS = 8;
+  const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 10000;
+  const BUFFER_UNDERRUN_GUARD_SECONDS = 2.5;
   const BUFFER_GUARD_INTERVAL_MS = 500;
   const AD_RETRY_DELAY_MS = 1000;
   const STATUS_COPY_RESET_MS = 1600;
@@ -564,6 +564,7 @@
     private bufferingWasPlaying = false;
     private bufferingStartedAt = 0;
     private translatedAudioReady = false;
+    private streamProcessing = false;
     private observedVideo: HTMLVideoElement | null = null;
 
     start(): void {
@@ -747,7 +748,7 @@
     }
 
     private requestStreamRefresh(): void {
-      if (this.activeVideoId === null || this.streamRefreshPending) {
+      if (this.activeVideoId === null || this.streamRefreshPending || this.streamProcessing) {
         return;
       }
       this.streamRefreshPending = true;
@@ -790,6 +791,7 @@
         preserveVoicePitch,
         transcript,
       };
+      this.streamProcessing = true;
       port.postMessage({ type: "startStream", ...request });
     }
 
@@ -799,6 +801,7 @@
       }
       if (message.type === "streamError") {
         const error = typeof message.error === "string" ? message.error : "Stream error";
+        this.streamProcessing = false;
         this.clearBufferGuard();
         this.resumeAfterBuffering();
         this.restoreMutedState();
@@ -806,6 +809,7 @@
         return;
       }
       if (message.type === "streamClosed") {
+        this.streamProcessing = false;
         if (message.code !== 1000) {
           this.clearBufferGuard();
           this.resumeAfterBuffering();
@@ -938,6 +942,7 @@
       this.bufferingWasPlaying = false;
       this.bufferingStartedAt = 0;
       this.translatedAudioReady = false;
+      this.streamProcessing = false;
       this.streamWindowEnd = null;
       this.streamRefreshPending = false;
       this.restoreMutedState();

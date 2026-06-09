@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import math
 import os
 import re
@@ -9,13 +10,14 @@ import shutil
 import tempfile
 import wave
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
 import edge_tts
 
 from .config import Settings
-from .interfaces import TTSProvider, TTSResult, TranslationProvider
+from .interfaces import TTSProvider, TTSResult, TranslationInput, TranslationProvider
 
 
 class ProviderConfigurationError(RuntimeError):
@@ -149,6 +151,92 @@ def _translation_prompt(target_name: str, duration_seconds: float) -> str:
         "wichtige Abkuerzungen so, dass sie natuerlich ausgesprochen werden. "
         "Nur nackter Output."
     )
+
+
+def _translation_batch_prompt(target_name: str) -> str:
+    return (
+        f"Uebersetze alle Items ins {target_name}. "
+        "Komprimiere jedes Item semantisch so, dass seine speech_duration_seconds "
+        "nicht ueberschritten wird. "
+        "Formuliere natuerlich fuer gesprochene TTS-Ausgabe: kurze, fluessige Saetze; "
+        "keine Listen, kein Markdown. "
+        "Schreibe Jahreszahlen, Uhrzeiten, Prozentwerte, Geldbetraege, Einheiten und "
+        "wichtige Abkuerzungen so, dass sie natuerlich ausgesprochen werden. "
+        "Antworte nur mit validem JSON in exakt dieser Form: "
+        '{"items":[{"id":0,"text":"..."}]}. '
+        "Erhalte alle id-Werte und ihre Reihenfolge."
+    )
+
+
+def _batch_translation_payload(items: Sequence[TranslationInput]) -> str:
+    return json.dumps(
+        {
+            "items": [
+                {
+                    "id": index,
+                    "speech_duration_seconds": round(item.duration_seconds, 2),
+                    "text": item.text,
+                }
+                for index, item in enumerate(items)
+            ]
+        },
+        ensure_ascii=False,
+    )
+
+
+def _batch_max_tokens(per_item_tokens: int, item_count: int) -> int:
+    return max(per_item_tokens, min(4000, per_item_tokens * max(1, item_count)))
+
+
+def _parse_json_object(value: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        start = value.find("{")
+        end = value.rfind("}")
+        if start < 0 or end <= start:
+            raise ProviderRequestError("Batch translation response was not valid JSON")
+        try:
+            parsed = json.loads(value[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise ProviderRequestError("Batch translation response was not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ProviderRequestError("Batch translation response JSON was not an object")
+    return parsed
+
+
+def _extract_batch_translation_texts(
+    response_text: str,
+    items: Sequence[TranslationInput],
+    settings: Settings,
+) -> list[str]:
+    payload = _parse_json_object(response_text)
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise ProviderRequestError("Batch translation response did not contain items")
+
+    by_id: dict[int, str] = {}
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        item_id = raw_item.get("id")
+        text = raw_item.get("text")
+        if isinstance(item_id, int) and isinstance(text, str):
+            by_id[item_id] = text
+
+    translations: list[str] = []
+    for index, item in enumerate(items):
+        text = by_id.get(index)
+        if text is None:
+            raise ProviderRequestError(f"Batch translation response missed item {index}")
+        translations.append(
+            _duration_guard(
+                text,
+                item.duration_seconds,
+                settings.duration_guard_chars_per_second,
+            )
+        )
+    return translations
 
 
 def _deepl_target_language(language_code: str, fallback: str) -> str:
@@ -408,6 +496,58 @@ class OpenAITranslator(TranslationProvider):
             self._settings.duration_guard_chars_per_second,
         )
 
+    async def translate_batch(
+        self,
+        items: Sequence[TranslationInput],
+        *,
+        target_language: str = "de",
+    ) -> list[str]:
+        if len(items) == 1:
+            item = items[0]
+            return [
+                await self.translate(
+                    item.text,
+                    duration_seconds=item.duration_seconds,
+                    target_language=target_language,
+                )
+            ]
+
+        target_name = _language_name(target_language)
+        response = await _post_with_retries(
+            "OpenAI translation",
+            self._client,
+            self._settings,
+            f"{self._settings.openai_base_url}/responses",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            json={
+                "model": self._settings.openai_translation_model,
+                "instructions": _translation_batch_prompt(target_name),
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": _batch_translation_payload(items),
+                            }
+                        ],
+                    }
+                ],
+                "temperature": self._settings.openai_temperature,
+                "max_output_tokens": _batch_max_tokens(
+                    self._settings.openai_max_output_tokens,
+                    len(items),
+                ),
+            },
+            timeout=self._settings.provider_timeout_seconds,
+        )
+        await _raise_for_provider_error("OpenAI translation", response)
+        return _extract_batch_translation_texts(
+            _extract_openai_response_text(response.json()),
+            items,
+            self._settings,
+        )
+
 
 class DeepLTranslator(TranslationProvider):
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
@@ -453,6 +593,48 @@ class DeepLTranslator(TranslationProvider):
             duration_seconds,
             self._settings.duration_guard_chars_per_second,
         )
+
+    async def translate_batch(
+        self,
+        items: Sequence[TranslationInput],
+        *,
+        target_language: str = "de",
+    ) -> list[str]:
+        response = await _post_with_retries(
+            "DeepL translation",
+            self._client,
+            self._settings,
+            f"{self._settings.deepl_api_base}/v2/translate",
+            headers={
+                "Authorization": f"DeepL-Auth-Key {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": [item.text for item in items],
+                "target_lang": _deepl_target_language(
+                    target_language,
+                    self._settings.deepl_target_lang,
+                ),
+            },
+            timeout=self._settings.provider_timeout_seconds,
+        )
+        await _raise_for_provider_error("DeepL translation", response)
+        payload = response.json()
+        translations = payload.get("translations")
+        if not isinstance(translations, list) or len(translations) != len(items):
+            raise ProviderRequestError("DeepL response did not contain all translations")
+        translated_texts: list[str] = []
+        for item, translation in zip(items, translations, strict=True):
+            if not isinstance(translation, dict) or not isinstance(translation.get("text"), str):
+                raise ProviderRequestError("DeepL response did not contain translated text")
+            translated_texts.append(
+                _duration_guard(
+                    translation["text"],
+                    item.duration_seconds,
+                    self._settings.duration_guard_chars_per_second,
+                )
+            )
+        return translated_texts
 
 
 class OpenRouterTranslator(TranslationProvider):
@@ -502,6 +684,59 @@ class OpenRouterTranslator(TranslationProvider):
             translated,
             duration_seconds,
             self._settings.duration_guard_chars_per_second,
+        )
+
+    async def translate_batch(
+        self,
+        items: Sequence[TranslationInput],
+        *,
+        target_language: str = "de",
+    ) -> list[str]:
+        if len(items) == 1:
+            item = items[0]
+            return [
+                await self.translate(
+                    item.text,
+                    duration_seconds=item.duration_seconds,
+                    target_language=target_language,
+                )
+            ]
+
+        target_name = _language_name(target_language)
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        if self._settings.openrouter_site_url:
+            headers["HTTP-Referer"] = self._settings.openrouter_site_url
+        if self._settings.openrouter_app_name:
+            headers["X-Title"] = self._settings.openrouter_app_name
+
+        response = await _post_with_retries(
+            "OpenRouter translation",
+            self._client,
+            self._settings,
+            f"{self._settings.openrouter_base_url}/chat/completions",
+            headers=headers,
+            json={
+                "model": self._settings.openrouter_model,
+                "messages": [
+                    {"role": "system", "content": _translation_batch_prompt(target_name)},
+                    {"role": "user", "content": _batch_translation_payload(items)},
+                ],
+                "temperature": self._settings.openrouter_temperature,
+                "max_tokens": _batch_max_tokens(
+                    self._settings.openrouter_max_tokens,
+                    len(items),
+                ),
+            },
+            timeout=self._settings.provider_timeout_seconds,
+        )
+        await _raise_for_provider_error("OpenRouter translation", response)
+        return _extract_batch_translation_texts(
+            _extract_chat_completion_text("OpenRouter", response.json()),
+            items,
+            self._settings,
         )
 
 
