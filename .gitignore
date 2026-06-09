@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .playwright-mcp/
+logs/
 
 extension/node_modules/
 extension/dist/

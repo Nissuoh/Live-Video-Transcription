@@ -303,12 +303,12 @@
 
       const sourceLanguage = runState.sourceLanguage;
       const targetLanguage = runState.targetLanguage;
-      const track = chooseCaptionTrack(playerResponse, sourceLanguage);
-      if (track === null) {
+      const tracks = chooseCaptionTracks(playerResponse, sourceLanguage);
+      if (tracks.length === 0) {
         showStatus(localizedMessage("captionsUnavailableError"), "error");
         return;
       }
-      const transcript = await fetchTranscript(track);
+      const transcript = await fetchTranscriptFromTracks(tracks);
       if (transcript.length === 0) {
         showStatus(localizedMessage("captionsEmptyError"), "error");
         return;
@@ -601,26 +601,39 @@
     return url.searchParams.get("v");
   }
 
-  function chooseCaptionTrack(
+  function chooseCaptionTracks(
     playerResponse: YouTubePlayerResponse,
     preferredLanguage: string,
-  ): CaptionTrack | null {
+  ): CaptionTrack[] {
     const tracks =
       playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
     if (tracks.length === 0) {
-      return null;
+      return [];
     }
-    return (
-      tracks.find(
+    return uniqueTracks([
+      ...tracks.filter(
         (track) => trackMatchesLanguage(track, preferredLanguage) && track.kind !== "asr",
-      ) ??
-      tracks.find((track) => trackMatchesLanguage(track, preferredLanguage)) ??
-      tracks.find((track) => track.languageCode?.startsWith("en") && track.kind !== "asr") ??
-      tracks.find((track) => track.kind !== "asr") ??
-      tracks.find((track) => track.languageCode?.startsWith("en")) ??
-      tracks[0] ??
-      null
-    );
+      ),
+      ...tracks.filter((track) => trackMatchesLanguage(track, preferredLanguage)),
+      ...tracks.filter((track) => track.languageCode?.startsWith("en") && track.kind !== "asr"),
+      ...tracks.filter((track) => track.kind !== "asr"),
+      ...tracks.filter((track) => track.languageCode?.startsWith("en")),
+      ...tracks,
+    ]);
+  }
+
+  function uniqueTracks(tracks: CaptionTrack[]): CaptionTrack[] {
+    const seen = new Set<string>();
+    const result: CaptionTrack[] = [];
+    for (const track of tracks) {
+      const key = track.baseUrl;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      result.push(track);
+    }
+    return result;
   }
 
   function trackMatchesLanguage(track: CaptionTrack, languageCode: string): boolean {
@@ -636,11 +649,34 @@
     );
   }
 
+  async function fetchTranscriptFromTracks(tracks: CaptionTrack[]): Promise<TranscriptItem[]> {
+    const errors: string[] = [];
+    for (const track of tracks) {
+      try {
+        const transcript = await fetchTranscript(track);
+        if (transcript.length > 0) {
+          return transcript;
+        }
+      } catch (error: unknown) {
+        const language = track.languageCode ?? "unknown";
+        const kind = track.kind ?? "manual";
+        errors.push(
+          `${language}/${kind}: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+      }
+    }
+    throw new Error(`Caption fetch failed for all tracks: ${errors.join(" | ")}`);
+  }
+
   async function fetchTranscript(track: CaptionTrack): Promise<TranscriptItem[]> {
     const errors: string[] = [];
-    for (const format of ["json3", "srv3"] as const) {
+    for (const format of ["json3", "srv3", "default", "vtt"] as const) {
       const url = new URL(track.baseUrl);
-      url.searchParams.set("fmt", format);
+      if (format === "default") {
+        url.searchParams.delete("fmt");
+      } else {
+        url.searchParams.set("fmt", format);
+      }
       try {
         const response = await fetch(url.toString(), { credentials: "include" });
         if (!response.ok) {
@@ -655,7 +691,9 @@
         const transcript =
           format === "json3"
             ? parseJsonTranscript(JSON.parse(body) as YouTubeTimedTextResponse)
-            : parseXmlTranscript(body);
+            : format === "vtt"
+              ? parseVttTranscript(body)
+              : parseXmlTranscript(body);
         if (transcript.length > 0) {
           return transcript;
         }
@@ -769,6 +807,64 @@
       });
     }
     return transcript;
+  }
+
+  function parseVttTranscript(vtt: string): TranscriptItem[] {
+    const blocks = vtt
+      .replace(/\r/g, "")
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter((block) => block.length > 0 && !block.startsWith("WEBVTT"));
+    const transcript: TranscriptItem[] = [];
+    for (const block of blocks) {
+      const lines = block.split("\n").map((line) => line.trim());
+      const timingIndex = lines.findIndex((line) => line.includes("-->"));
+      if (timingIndex < 0) {
+        continue;
+      }
+      const timing = lines[timingIndex];
+      if (timing === undefined) {
+        continue;
+      }
+      const [startRaw, endRaw] = timing.split("-->").map((part) => part.trim().split(/\s+/, 1)[0]);
+      if (startRaw === undefined || endRaw === undefined) {
+        continue;
+      }
+      const start = parseVttTime(startRaw);
+      const end = parseVttTime(endRaw);
+      const text = normalizeCaptionText(
+        lines
+          .slice(timingIndex + 1)
+          .join(" ")
+          .replace(/<[^>]+>/g, ""),
+      );
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        start < 0 ||
+        end <= start ||
+        text.length === 0
+      ) {
+        continue;
+      }
+      transcript.push({ start, duration: end - start, text });
+    }
+    return transcript;
+  }
+
+  function parseVttTime(value: string): number {
+    const parts = value.split(":");
+    const secondsPart = parts.pop();
+    if (secondsPart === undefined) {
+      return Number.NaN;
+    }
+    const seconds = Number(secondsPart.replace(",", "."));
+    const minutes = Number(parts.pop() ?? "0");
+    const hours = Number(parts.pop() ?? "0");
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+      return Number.NaN;
+    }
+    return hours * 3600 + minutes * 60 + seconds;
   }
 
   function normalizeCaptionText(text: string): string {
