@@ -10,4 +10,5 @@ __pycache__/
 extension/node_modules/
 extension/dist/
 extension/webstore/
+extension-unpacked/
 extension/*.tsbuildinfo
