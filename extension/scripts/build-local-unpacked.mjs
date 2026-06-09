@@ -7,6 +7,7 @@ const extensionRoot = resolve(scriptDir, "..");
 const workspaceRoot = resolve(extensionRoot, "..");
 const targetRoot = join(workspaceRoot, "extension-unpacked");
 const localBackendUrl = "ws://127.0.0.1:8000/stream";
+const localBackendAccessToken = "local-dev-token";
 const include = [
   "manifest.json",
   "popup.html",
@@ -31,6 +32,9 @@ await writeFile(
   defaultsSource.replace(
     'export const DEFAULT_BACKEND_WSS_URL = "";',
     `export const DEFAULT_BACKEND_WSS_URL = "${localBackendUrl}";`,
+  ).replace(
+    'export const DEFAULT_BACKEND_ACCESS_TOKEN = "";',
+    `export const DEFAULT_BACKEND_ACCESS_TOKEN = "${localBackendAccessToken}";`,
   ),
 );
 
@@ -45,3 +49,4 @@ await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`Created ${targetRoot}`);
 console.log(`Local backend URL: ${localBackendUrl}`);
+console.log(`Local backend access token: ${localBackendAccessToken}`);

@@ -1,5 +1,6 @@
 import {
   DEFAULT_BACKEND_WSS_URL,
+  resolveBackendAccessToken,
   isAllowedBackendStreamUrl,
   resolveBackendWssUrl,
 } from "./defaults.js";
@@ -161,7 +162,7 @@ import {
     }
     const config = (await chrome.storage.local.get([...CONFIG_KEYS])) as ExtensionConfig;
     const enabled = config.autoTranslate === true;
-    const authToken = typeof config.authToken === "string" ? config.authToken.trim() : "";
+    const authToken = resolveBackendAccessToken(config.authToken);
     const backendWssUrl = resolveBackendWssUrl(config.backendWssUrl);
     const sourceLanguage =
       typeof config.sourceLanguage === "string" && config.sourceLanguage.trim().length > 0
@@ -287,7 +288,7 @@ import {
 
   async function loadConfig(): Promise<Required<ExtensionConfig>> {
     const stored = (await chrome.storage.local.get([...CONFIG_KEYS])) as ExtensionConfig;
-    const authToken = typeof stored.authToken === "string" ? stored.authToken.trim() : "";
+    const authToken = resolveBackendAccessToken(stored.authToken);
     const backendWssUrl = resolveBackendWssUrl(stored.backendWssUrl);
     if (stored.autoTranslate !== true) {
       throw new Error(localizedMessage("autoTranslationDisabledError"));

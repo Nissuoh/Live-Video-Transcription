@@ -17,6 +17,12 @@
   "connectionSection": {
     "message": "Verbindung"
   },
+  "configurationLoadedStatus": {
+    "message": "Konfiguration geladen."
+  },
+  "configurationSummary": {
+    "message": "Backend: $1. Token: $2 Zeichen, SHA-256: $3."
+  },
   "languageSection": {
     "message": "Sprache"
   },

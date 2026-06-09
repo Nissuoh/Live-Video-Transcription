@@ -1,7 +1,10 @@
 import {
+  DEFAULT_BACKEND_ACCESS_TOKEN,
   DEFAULT_BACKEND_WSS_URL,
+  hasDefaultBackendAccessToken,
   hasDefaultBackendWssUrl,
   isAllowedBackendStreamUrl,
+  resolveBackendAccessToken,
   resolveBackendWssUrl,
 } from "./defaults.js";
 
@@ -58,6 +61,8 @@ import {
     backendUrlPlaceholder: "wss://example.com/stream",
     backendWssError: "Backend URL must use wss:// or local ws://localhost.",
     connectionSection: "Connection",
+    configurationLoadedStatus: "Configuration loaded.",
+    configurationSummary: "Backend: $1. Token: $2 chars, SHA-256: $3.",
     hideTokenButton: "Hide token",
     languageSection: "Language",
     missingElementError: "Missing required element: $1",
@@ -113,10 +118,11 @@ import {
     const targetLanguage =
       typeof config.targetLanguage === "string" ? config.targetLanguage : "de";
     backendInput.value = resolveBackendWssUrl(config.backendWssUrl);
-    tokenInput.value = typeof config.authToken === "string" ? config.authToken : "";
+    tokenInput.value = resolveBackendAccessToken(config.authToken);
     autoTranslateInput.checked = config.autoTranslate === true;
     populateLanguageSelect(sourceLanguageInput, sourceLanguage);
     populateLanguageSelect(targetLanguageInput, targetLanguage);
+    await setConfigStatus(message("configurationLoadedStatus"), "ok");
   }
 
   async function saveOptions(): Promise<void> {
@@ -126,7 +132,7 @@ import {
       return;
     }
     const backendWssUrl = resolveBackendWssUrl(backendInput.value);
-    const authToken = tokenInput.value.trim();
+    const authToken = resolveBackendAccessToken(tokenInput.value);
     const autoTranslate = autoTranslateInput.checked;
     const sourceLanguage = sourceLanguageInput.value;
     const targetLanguage = targetLanguageInput.value;
@@ -145,7 +151,7 @@ import {
         targetLanguage,
       });
       await notifyActiveYouTubeTab();
-      setStatus(message("savedStatus"), "ok");
+      await setConfigStatus(message("savedStatus"), "ok");
     } catch (error: unknown) {
       setStatus(error instanceof Error ? error.message : message("settingsInvalidError"), "error");
     }
@@ -172,10 +178,18 @@ import {
 
   function applyBackendDefaults(): void {
     if (!hasDefaultBackendWssUrl()) {
-      return;
+      if (!hasDefaultBackendAccessToken()) {
+        return;
+      }
     }
-    backendInput.value = DEFAULT_BACKEND_WSS_URL;
-    backendField.hidden = true;
+    if (hasDefaultBackendWssUrl()) {
+      backendInput.value = DEFAULT_BACKEND_WSS_URL;
+      backendField.hidden = true;
+    }
+    if (hasDefaultBackendAccessToken()) {
+      tokenInput.value = DEFAULT_BACKEND_ACCESS_TOKEN;
+      tokenInput.readOnly = true;
+    }
   }
 
   function populateLanguageSelect(select: HTMLSelectElement, selectedLanguage: string): void {
@@ -235,6 +249,39 @@ import {
     } else {
       delete status.dataset.kind;
     }
+  }
+
+  async function setConfigStatus(prefix: string, kind: "ok" | "error"): Promise<void> {
+    if (kind === "error") {
+      setStatus(prefix, kind);
+      return;
+    }
+    const backendWssUrl = resolveBackendWssUrl(backendInput.value);
+    const authToken = resolveBackendAccessToken(tokenInput.value);
+    const fingerprint = await fingerprintToken(authToken);
+    setStatus(
+      `${prefix} ${message("configurationSummary", [
+        backendWssUrl || "-",
+        String(authToken.length),
+        fingerprint,
+      ])}`,
+      kind,
+    );
+  }
+
+  async function fingerprintToken(value: string): Promise<string> {
+    if (value.length === 0) {
+      return "empty";
+    }
+    const cryptoApi = globalThis.crypto;
+    if (cryptoApi?.subtle === undefined) {
+      return "unavailable";
+    }
+    const digest = await cryptoApi.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return Array.from(new Uint8Array(digest))
+      .slice(0, 6)
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
   }
 
   function getStorage(): chrome.storage.StorageArea | null {
