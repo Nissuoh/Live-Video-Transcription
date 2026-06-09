@@ -88,6 +88,12 @@ class Settings(BaseSettings):
 
     duration_guard_chars_per_second: float = Field(default=14.0, gt=1, le=40)
     tts_max_playback_rate: float = Field(default=1.35, ge=1.0, le=4.0)
+    tts_pronunciation_enabled: bool = True
+    tts_english_initialisms: str = (
+        "ADHD,AGI,AI,API,AR,BIOS,CIA,CPU,CSS,CTO,FBI,FPS,GPU,HTML,HTTP,HTTPS,"
+        "IT,JSON,LLM,ML,NATO,NSA,OS,PDF,RAM,REST,SQL,UI,UK,URL,US,USA,USB,"
+        "UX,VPN,VR,XML"
+    )
 
     @field_validator("openai_base_url", "deepl_api_base", "openrouter_base_url")
     @classmethod
@@ -107,6 +113,14 @@ class Settings(BaseSettings):
             origin.strip()
             for origin in self.websocket_allowed_origins.split(",")
             if origin.strip()
+        )
+
+    @property
+    def english_initialism_values(self) -> tuple[str, ...]:
+        return tuple(
+            value.strip().upper().replace(".", "")
+            for value in self.tts_english_initialisms.split(",")
+            if value.strip()
         )
 
 

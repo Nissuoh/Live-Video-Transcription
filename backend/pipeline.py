@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from .config import Settings
 from .interfaces import TTSProvider, TranslationProvider
+from .pronunciation import normalize_tts_pronunciation
 from .schemas import StreamChunk, StreamRequest, TranscriptItem
 
 
@@ -99,8 +100,14 @@ class TranslationPipeline:
             duration_seconds=item.duration,
             target_language=target_language,
         )
-        speech = await self._tts.synthesize(
+        spoken_text = normalize_tts_pronunciation(
             translated_text,
+            target_language=target_language,
+            enabled=self._settings.tts_pronunciation_enabled,
+            english_initialisms=self._settings.english_initialism_values,
+        )
+        speech = await self._tts.synthesize(
+            spoken_text,
             target_duration_seconds=item.duration,
             target_language=target_language,
             voice_gender=voice_gender,

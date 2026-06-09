@@ -72,6 +72,8 @@ PIPER_FEMALE_CONFIG_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\d
 
 Piper laeuft lokal auf CPU und nutzt lokale ONNX-Stimmen. Die mitgelieferte lokale Empfehlung ist `de_DE-thorsten-medium` fuer maennlich und `de_DE-eva_k-x_low` fuer weiblich.
 
+Vor der Sprachausgabe normalisiert das Backend haeufige englische Initialismen fuer deutsche TTS-Stimmen. Dadurch werden Begriffe wie `C.I.A.`, `FBI`, `NSA`, `AI`, `GPU`, `URL` oder `VPN` nicht als deutsche Woerter gelesen, sondern als englisch klingende Buchstabenfolge gesprochen. Die Liste ist ueber `TTS_ENGLISH_INITIALISMS` in `.env` erweiterbar; mit `TTS_PRONUNCIATION_ENABLED=false` kann die Normalisierung deaktiviert werden.
+
 OpenRouter als Text-Uebersetzer mit separatem TTS-Provider:
 
 ```env
