@@ -166,7 +166,7 @@ The popup and options UI support selectable interface language through `uiLangua
 
 Source and target language labels are rendered through `Intl.DisplayNames`, so language names match the selected interface language where the browser supports it.
 
-`preserveVoicePitch` is enabled by default. When the user changes YouTube playback speed to 1.25x, 1.5x, or 2x, translated speech stays synchronized while the content script locally time-compresses audio so a low male voice does not become artificially high.
+`preserveVoicePitch` is enabled by default. When the user changes YouTube playback speed to 1.25x, 1.5x, or 2x, translated speech stays synchronized while the content script uses Chrome's native pitch-preserving media playback so a low male voice does not become artificially high or robotic.
 
 For a public production build, set `DEFAULT_BACKEND_WSS_URL` in [extension/src/defaults.ts](extension/src/defaults.ts). Then users only enter the backend access token, choose languages and voice settings, and enable translation.
 

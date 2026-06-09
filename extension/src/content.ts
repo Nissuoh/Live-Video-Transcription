@@ -95,7 +95,13 @@
     end: number;
     playbackRate: number;
     buffer: AudioBuffer;
-    stretchedBuffers: Map<string, AudioBuffer>;
+    audioUrl: string;
+  }
+
+  interface ActiveMediaElement {
+    audio: HTMLAudioElement;
+    sourceNode: MediaElementAudioSourceNode;
+    timerId: number | null;
   }
 
   interface StatusAction {
@@ -123,10 +129,6 @@
   const TRANSCRIPT_PANEL_WAIT_MS = 12000;
   const TRANSCRIPT_PANEL_POLL_MS = 250;
   const PITCH_PRESERVE_RATE_EPSILON = 0.02;
-  const TIME_STRETCH_WINDOW_SECONDS = 0.04;
-  const TIME_STRETCH_MIN_FRAME_SIZE = 512;
-  const TIME_STRETCH_MAX_FRAME_SIZE = 4096;
-  const TIME_STRETCH_CACHE_LIMIT = 4;
   const STREAM_PORT_NAME = "translation-stream";
   const FALLBACK_MESSAGES: Record<string, string> = {
     adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
@@ -157,6 +159,7 @@
     private readonly chunks = new Map<number, DecodedAudioChunk>();
     private readonly scheduledKeys = new Set<number>();
     private readonly activeSources = new Map<AudioBufferSourceNode, number>();
+    private readonly activeMediaElements = new Set<ActiveMediaElement>();
     private audioContext: AudioContext | null = null;
     private gainNode: GainNode | null = null;
     private animationFrameId: number | null = null;
@@ -179,13 +182,16 @@
     async addChunk(chunk: StreamChunk): Promise<void> {
       const context = this.getAudioContext();
       const audioData = base64ToArrayBuffer(chunk.audioBase64);
-      const buffer = await context.decodeAudioData(audioData);
+      const buffer = await context.decodeAudioData(audioData.slice(0));
+      const audioUrl = URL.createObjectURL(
+        new Blob([audioData], { type: detectAudioMimeType(audioData) }),
+      );
       this.chunks.set(chunk.start, {
         start: chunk.start,
         end: chunk.end,
         playbackRate: chunk.suggestedPlaybackRate,
         buffer,
-        stretchedBuffers: new Map(),
+        audioUrl,
       });
       this.startLoop();
     }
@@ -262,7 +268,7 @@
         this.animationFrameId = null;
       }
       this.stopActiveSources();
-      this.chunks.clear();
+      this.clearChunks();
       this.scheduledKeys.clear();
       this.video.removeEventListener("play", this.onPlaybackResumed);
       this.video.removeEventListener("pause", this.onPlaybackInterrupted);
@@ -338,8 +344,7 @@
         ([left], [right]) => left - right,
       )) {
         if (chunk.end < currentTime - STALE_CHUNK_SECONDS) {
-          this.chunks.delete(key);
-          this.scheduledKeys.delete(key);
+          this.deleteChunk(key);
           continue;
         }
         if (this.scheduledKeys.has(key)) {
@@ -366,10 +371,31 @@
         this.notifyAudioState();
       });
       const effectivePlaybackRate = clampPlaybackRate(this.video.playbackRate * chunk.playbackRate);
-      const playbackBuffer = this.resolvePlaybackBuffer(context, chunk, effectivePlaybackRate);
+      if (
+        this.preserveVoicePitch &&
+        Math.abs(effectivePlaybackRate - 1) > PITCH_PRESERVE_RATE_EPSILON &&
+        supportsMediaElementPitchPreservation()
+      ) {
+        this.scheduleMediaElementChunk(key, chunk, currentTime, effectivePlaybackRate);
+        return;
+      }
+      this.scheduleBufferSourceChunk(key, chunk, currentTime, effectivePlaybackRate);
+    }
+
+    private scheduleBufferSourceChunk(
+      key: number,
+      chunk: DecodedAudioChunk,
+      currentTime: number,
+      effectivePlaybackRate: number,
+    ): void {
+      const context = this.getAudioContext();
+      const gainNode = this.gainNode;
+      if (gainNode === null) {
+        return;
+      }
       const source = context.createBufferSource();
-      source.buffer = playbackBuffer;
-      source.playbackRate.value = this.preserveVoicePitch ? 1 : effectivePlaybackRate;
+      source.buffer = chunk.buffer;
+      source.playbackRate.value = effectivePlaybackRate;
       source.connect(gainNode);
       source.onended = () => {
         this.activeSources.delete(source);
@@ -377,13 +403,13 @@
 
       const startDelay = Math.max(0, chunk.start - currentTime);
       const requestedWhen = context.currentTime + startDelay;
-      const audioOffset = calculateAudioOffset(chunk, playbackBuffer, currentTime);
+      const audioOffset = calculateAudioOffset(chunk, chunk.buffer, currentTime);
       const when = Math.max(requestedWhen, this.nextScheduledContextTime);
       this.activeSources.set(source, chunk.playbackRate);
       this.scheduledKeys.add(key);
       try {
         source.start(when, audioOffset);
-        const remainingSeconds = Math.max(0, playbackBuffer.duration - audioOffset);
+        const remainingSeconds = Math.max(0, chunk.buffer.duration - audioOffset);
         this.nextScheduledContextTime = Math.max(
           this.nextScheduledContextTime,
           when + remainingSeconds / source.playbackRate.value,
@@ -394,35 +420,80 @@
       }
     }
 
-    private resolvePlaybackBuffer(
-      context: AudioContext,
+    private scheduleMediaElementChunk(
+      key: number,
       chunk: DecodedAudioChunk,
+      currentTime: number,
       effectivePlaybackRate: number,
-    ): AudioBuffer {
-      if (
-        !this.preserveVoicePitch ||
-        Math.abs(effectivePlaybackRate - 1) <= PITCH_PRESERVE_RATE_EPSILON
-      ) {
-        return chunk.buffer;
+    ): void {
+      const context = this.getAudioContext();
+      const gainNode = this.gainNode;
+      if (gainNode === null) {
+        return;
       }
-      const cacheKey = quantizePlaybackRate(effectivePlaybackRate).toFixed(2);
-      const cachedBuffer = chunk.stretchedBuffers.get(cacheKey);
-      if (cachedBuffer !== undefined) {
-        return cachedBuffer;
+      const audio = new Audio(chunk.audioUrl);
+      audio.preload = "auto";
+      audio.playbackRate = effectivePlaybackRate;
+      audio.defaultPlaybackRate = effectivePlaybackRate;
+      setMediaElementPreservesPitch(audio, true);
+
+      let sourceNode: MediaElementAudioSourceNode;
+      try {
+        sourceNode = context.createMediaElementSource(audio);
+        sourceNode.connect(gainNode);
+      } catch (error: unknown) {
+        console.warn("[Live Video Translation] MediaElementAudioSource setup failed", error);
+        this.scheduleBufferSourceChunk(key, chunk, currentTime, effectivePlaybackRate);
+        return;
       }
-      const stretchedBuffer = createPitchPreservedBuffer(
-        context,
-        chunk.buffer,
-        Number.parseFloat(cacheKey),
-      );
-      if (chunk.stretchedBuffers.size >= TIME_STRETCH_CACHE_LIMIT) {
-        const oldestKey = chunk.stretchedBuffers.keys().next().value as string | undefined;
-        if (oldestKey !== undefined) {
-          chunk.stretchedBuffers.delete(oldestKey);
+
+      const startDelay = Math.max(0, chunk.start - currentTime);
+      const requestedWhen = context.currentTime + startDelay;
+      const audioOffset = calculateAudioOffset(chunk, chunk.buffer, currentTime);
+      const when = Math.max(requestedWhen, this.nextScheduledContextTime);
+      const remainingSeconds = Math.max(0, chunk.buffer.duration - audioOffset);
+      const mediaElement: ActiveMediaElement = {
+        audio,
+        sourceNode,
+        timerId: null,
+      };
+      const cleanup = (): void => {
+        this.activeMediaElements.delete(mediaElement);
+        try {
+          sourceNode.disconnect();
+        } catch {
+          // The node can already be disconnected by a stop or error path.
         }
+      };
+      audio.addEventListener("ended", cleanup, { once: true });
+      audio.addEventListener("error", cleanup, { once: true });
+      this.activeMediaElements.add(mediaElement);
+      this.scheduledKeys.add(key);
+      this.nextScheduledContextTime = Math.max(
+        this.nextScheduledContextTime,
+        when + remainingSeconds / effectivePlaybackRate,
+      );
+
+      const play = (): void => {
+        mediaElement.timerId = null;
+        try {
+          audio.currentTime = audioOffset;
+        } catch {
+          // Some decoders reject seeking until metadata is available; playback still starts.
+        }
+        void audio.play().catch((error: unknown) => {
+          cleanup();
+          console.warn("[Live Video Translation] Pitch-preserving playback failed", error);
+          this.scheduledKeys.delete(key);
+          this.scheduleBufferSourceChunk(key, chunk, this.video.currentTime, effectivePlaybackRate);
+        });
+      };
+      const delayMs = Math.max(0, (when - context.currentTime) * 1000);
+      if (delayMs <= 20) {
+        play();
+        return;
       }
-      chunk.stretchedBuffers.set(cacheKey, stretchedBuffer);
-      return stretchedBuffer;
+      mediaElement.timerId = window.setTimeout(play, delayMs);
     }
 
     private stopActiveSources(): void {
@@ -434,7 +505,37 @@
         }
       }
       this.activeSources.clear();
+      for (const mediaElement of this.activeMediaElements) {
+        if (mediaElement.timerId !== null) {
+          window.clearTimeout(mediaElement.timerId);
+        }
+        mediaElement.audio.pause();
+        mediaElement.audio.removeAttribute("src");
+        mediaElement.audio.load();
+        try {
+          mediaElement.sourceNode.disconnect();
+        } catch {
+          // The node can already be disconnected by the browser.
+        }
+      }
+      this.activeMediaElements.clear();
       this.nextScheduledContextTime = 0;
+    }
+
+    private deleteChunk(key: number): void {
+      const chunk = this.chunks.get(key);
+      if (chunk !== undefined) {
+        URL.revokeObjectURL(chunk.audioUrl);
+      }
+      this.chunks.delete(key);
+      this.scheduledKeys.delete(key);
+    }
+
+    private clearChunks(): void {
+      for (const chunk of this.chunks.values()) {
+        URL.revokeObjectURL(chunk.audioUrl);
+      }
+      this.chunks.clear();
     }
   }
 
@@ -2272,110 +2373,59 @@
     );
   }
 
-  function createPitchPreservedBuffer(
-    context: AudioContext,
-    input: AudioBuffer,
-    playbackRate: number,
-  ): AudioBuffer {
-    const rate = clampPlaybackRate(playbackRate);
-    if (Math.abs(rate - 1) <= PITCH_PRESERVE_RATE_EPSILON || input.length <= 1) {
-      return input;
-    }
-    const outputLength = Math.max(1, Math.round(input.length / rate));
-    const output = context.createBuffer(input.numberOfChannels, outputLength, input.sampleRate);
-    const frameSize = chooseTimeStretchFrameSize(input.sampleRate, input.length);
-    const synthesisHop = Math.max(64, Math.round(frameSize / 4));
-    const analysisHop = synthesisHop * rate;
-    const window = createHannWindow(frameSize);
-
-    for (let channel = 0; channel < input.numberOfChannels; channel += 1) {
-      const source: Float32Array<ArrayBuffer> = new Float32Array(input.length);
-      input.copyFromChannel(source, channel);
-      const rendered = renderTimeStretchedChannel(
-        source,
-        outputLength,
-        frameSize,
-        synthesisHop,
-        analysisHop,
-        window,
-      );
-      output.copyToChannel(rendered, channel);
-    }
-    return output;
-  }
-
-  function renderTimeStretchedChannel(
-    source: Float32Array<ArrayBuffer>,
-    outputLength: number,
-    frameSize: number,
-    synthesisHop: number,
-    analysisHop: number,
-    window: Float32Array<ArrayBuffer>,
-  ): Float32Array<ArrayBuffer> {
-    const renderLength = outputLength + frameSize + synthesisHop;
-    const mix: Float32Array<ArrayBuffer> = new Float32Array(renderLength);
-    const weights: Float32Array<ArrayBuffer> = new Float32Array(renderLength);
-    let frameIndex = 0;
-
-    while (true) {
-      const inputPosition = Math.round(frameIndex * analysisHop);
-      const outputPosition = frameIndex * synthesisHop;
-      if (inputPosition >= source.length || outputPosition >= renderLength) {
-        break;
-      }
-      const available = Math.min(
-        frameSize,
-        source.length - inputPosition,
-        renderLength - outputPosition,
-      );
-      for (let index = 0; index < available; index += 1) {
-        const weight = window[index] ?? 1;
-        const outputIndex = outputPosition + index;
-        mix[outputIndex] = (mix[outputIndex] ?? 0) + (source[inputPosition + index] ?? 0) * weight;
-        weights[outputIndex] = (weights[outputIndex] ?? 0) + weight;
-      }
-      frameIndex += 1;
-    }
-
-    const output: Float32Array<ArrayBuffer> = new Float32Array(outputLength);
-    for (let index = 0; index < outputLength; index += 1) {
-      const weight = weights[index] ?? 0;
-      const mixed = mix[index] ?? 0;
-      const value = weight > 0.0001 ? mixed / weight : mixed;
-      output[index] = Math.max(-1, Math.min(1, value));
-    }
-    return output;
-  }
-
-  function chooseTimeStretchFrameSize(sampleRate: number, inputLength: number): number {
-    const target = Math.round(sampleRate * TIME_STRETCH_WINDOW_SECONDS);
-    return Math.max(
-      TIME_STRETCH_MIN_FRAME_SIZE,
-      Math.min(TIME_STRETCH_MAX_FRAME_SIZE, Math.max(2, inputLength), target),
-    );
-  }
-
-  function createHannWindow(length: number): Float32Array<ArrayBuffer> {
-    const window: Float32Array<ArrayBuffer> = new Float32Array(length);
-    if (length <= 1) {
-      window.fill(1);
-      return window;
-    }
-    for (let index = 0; index < length; index += 1) {
-      window[index] = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / (length - 1));
-    }
-    return window;
-  }
-
-  function quantizePlaybackRate(playbackRate: number): number {
-    return Math.round(clampPlaybackRate(playbackRate) * 20) / 20;
-  }
-
   function clampPlaybackRate(value: number): number {
     if (!Number.isFinite(value)) {
       return 1;
     }
     return Math.max(0.25, Math.min(4, value));
+  }
+
+  function supportsMediaElementPitchPreservation(): boolean {
+    return (
+      "preservesPitch" in HTMLMediaElement.prototype ||
+      "webkitPreservesPitch" in HTMLMediaElement.prototype ||
+      "mozPreservesPitch" in HTMLMediaElement.prototype
+    );
+  }
+
+  function setMediaElementPreservesPitch(audio: HTMLAudioElement, value: boolean): void {
+    const media = audio as HTMLAudioElement & {
+      mozPreservesPitch?: boolean;
+      preservesPitch?: boolean;
+      webkitPreservesPitch?: boolean;
+    };
+    if ("preservesPitch" in media) {
+      media.preservesPitch = value;
+    }
+    if ("webkitPreservesPitch" in media) {
+      media.webkitPreservesPitch = value;
+    }
+    if ("mozPreservesPitch" in media) {
+      media.mozPreservesPitch = value;
+    }
+  }
+
+  function detectAudioMimeType(audioData: ArrayBuffer): string {
+    const bytes = new Uint8Array(audioData.slice(0, 16));
+    if (
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x41 &&
+      bytes[10] === 0x56 &&
+      bytes[11] === 0x45
+    ) {
+      return "audio/wav";
+    }
+    if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+      return "audio/mpeg";
+    }
+    if (bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0) {
+      return "audio/mpeg";
+    }
+    return "audio/mpeg";
   }
 
   function base64ToArrayBuffer(value: string): ArrayBuffer {

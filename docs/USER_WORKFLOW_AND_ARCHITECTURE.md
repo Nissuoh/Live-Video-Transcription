@@ -89,7 +89,7 @@ The popup and options UI store `uiLanguage` separately from source and target la
 
 ## Playback Speed And Pitch
 
-YouTube playback speed and translated speech speed stay synchronized. With `preserveVoicePitch=true`, the content script does local time-compression before scheduling each translated audio chunk. This keeps a low or male voice from becoming artificially high at 1.25x, 1.5x, or 2x playback speed.
+YouTube playback speed and translated speech speed stay synchronized. With `preserveVoicePitch=true`, the content script uses Chrome's native pitch-preserving media playback for sped-up translated chunks. This keeps a low or male voice from becoming artificially high or robotic at 1.25x, 1.5x, or 2x playback speed.
 
 ## Production Shape
 
