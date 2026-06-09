@@ -980,48 +980,74 @@
     )}&prettyPrint=false`;
     const paramsCandidates = uniqueStrings([params, safeDecodeURIComponent(params)]);
     for (const candidate of paramsCandidates) {
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...buildInnertubeHeaders(context),
-          },
-          body: JSON.stringify({
-            context,
-            params: candidate,
-            externalVideoId: fallback.videoId ?? resolvePageVideoId() ?? undefined,
-          }),
-        });
-        const body = await response.text();
-        if (!response.ok) {
-          errors.push(`HTTP ${response.status}: ${body.slice(0, 240)}`);
-          continue;
+      const requestBodies = buildInnertubeRequestBodies(context, candidate, fallback.videoId);
+      for (const requestBody of requestBodies) {
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              ...buildInnertubeHeaders(context),
+            },
+            body: JSON.stringify(requestBody.body),
+          });
+          const body = await response.text();
+          if (!response.ok) {
+            errors.push(`${requestBody.label} HTTP ${response.status}: ${body.slice(0, 180)}`);
+            continue;
+          }
+          if (body.trim().length === 0) {
+            errors.push(`${requestBody.label} empty response`);
+            continue;
+          }
+          const transcript = parseInnertubeTranscript(JSON.parse(body));
+          if (transcript.length > 0) {
+            return transcript;
+          }
+          errors.push(`${requestBody.label} response did not contain transcript segments`);
+        } catch (error: unknown) {
+          errors.push(
+            `${requestBody.label} ${error instanceof Error ? error.message : "unknown error"}`,
+          );
         }
-        if (body.trim().length === 0) {
-          errors.push("empty response");
-          continue;
-        }
-        const transcript = parseInnertubeTranscript(JSON.parse(body));
-        if (transcript.length > 0) {
-          return transcript;
-        }
-        errors.push("response did not contain transcript segments");
-      } catch (error: unknown) {
-        errors.push(error instanceof Error ? error.message : "unknown error");
       }
     }
     throw new Error(`YouTube transcript panel fallback failed: ${errors.join("; ")}`);
   }
 
+  function buildInnertubeRequestBodies(
+    context: Record<string, unknown>,
+    params: string,
+    videoId?: string,
+  ): Array<{ label: string; body: Record<string, unknown> }> {
+    const baseBody = { context, params };
+    if (videoId === undefined || videoId.length === 0) {
+      return [{ label: "base", body: baseBody }];
+    }
+    return [
+      { label: "base", body: baseBody },
+      {
+        label: "externalVideoId",
+        body: {
+          ...baseBody,
+          externalVideoId: videoId,
+        },
+      },
+    ];
+  }
+
   function buildInnertubeHeaders(context: Record<string, unknown>): Record<string, string> {
     const headers: Record<string, string> = {
+      "X-Origin": "https://www.youtube.com",
       "X-Youtube-Client-Name": "1",
     };
     const client = context.client;
     if (isRecord(client) && typeof client.clientVersion === "string") {
       headers["X-Youtube-Client-Version"] = client.clientVersion;
+    }
+    if (isRecord(client) && typeof client.visitorData === "string") {
+      headers["X-Goog-Visitor-Id"] = client.visitorData;
     }
     return headers;
   }
