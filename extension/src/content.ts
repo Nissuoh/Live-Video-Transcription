@@ -87,13 +87,13 @@
   const LATE_TOLERANCE_SECONDS = 2;
   const STALE_CHUNK_SECONDS = 30;
   const TRANSCRIPT_LOOKBACK_SECONDS = 0.75;
-  const STREAM_LOOKAHEAD_SECONDS = 18;
-  const STREAM_REFRESH_MARGIN_SECONDS = 6;
-  const STREAM_RESTART_MIN_DELAY_MS = 5000;
+  const STREAM_LOOKAHEAD_SECONDS = 36;
+  const STREAM_REFRESH_MARGIN_SECONDS = 16;
+  const STREAM_RESTART_MIN_DELAY_MS = 8000;
   const STREAM_RESTART_MAX_DELAY_MS = 30000;
-  const MERGED_TRANSCRIPT_TARGET_SECONDS = 8;
-  const MERGED_TRANSCRIPT_MAX_CHARS = 900;
-  const MERGED_TRANSCRIPT_MAX_ITEMS = 3;
+  const MERGED_TRANSCRIPT_TARGET_SECONDS = 16;
+  const MERGED_TRANSCRIPT_MAX_CHARS = 1600;
+  const MERGED_TRANSCRIPT_MAX_ITEMS = 2;
   const INITIAL_AUDIO_BUFFER_SECONDS = 4;
   const INITIAL_AUDIO_BUFFER_MAX_WAIT_MS = 8000;
   const AD_RETRY_DELAY_MS = 1000;
@@ -370,6 +370,7 @@
     private adRetryTimer: number | null = null;
     private streamRestartTimer: number | null = null;
     private streamWindowEnd: number | null = null;
+    private streamRefreshPending = false;
     private bufferingWasPlaying = false;
     private bufferingStartedAt = 0;
     private translatedAudioReady = false;
@@ -441,11 +442,18 @@
         this.scheduleAdRetry();
         return;
       }
-      if (this.activeVideoId === videoId) {
+      const isStreamRefresh = this.activeVideoId === videoId && this.streamRefreshPending;
+      if (this.activeVideoId === videoId && !isStreamRefresh) {
         return;
       }
-      this.teardown();
-      this.currentVideo = video;
+      if (isStreamRefresh) {
+        this.streamRefreshPending = false;
+        this.closeStreamPort();
+        this.currentVideo = video;
+      } else {
+        this.teardown();
+        this.currentVideo = video;
+      }
 
       const sourceLanguage = runState.sourceLanguage;
       const targetLanguage = runState.targetLanguage;
@@ -476,7 +484,9 @@
       }
       this.streamWindowEnd = transcriptWindowEnd(playbackTranscript);
       this.activeVideoId = videoId;
-      this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
+      if (this.scheduler === null) {
+        this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
+      }
       this.openStream(videoId, playbackTranscript, sourceLanguage, targetLanguage);
     }
 
@@ -524,7 +534,7 @@
           this.scheduleStreamRestart();
           return;
         }
-        this.activeVideoId = null;
+        this.streamRefreshPending = true;
         this.queueBootstrap();
       }, delayMs);
     }
@@ -586,7 +596,9 @@
       }
       if (message.type === "streamOpen") {
         this.muteCurrentVideo();
-        this.pauseForInitialBuffering();
+        if (this.shouldPauseForInitialBuffering()) {
+          this.pauseForInitialBuffering();
+        }
         showStatus(localizedMessage("preparingAudioStatus"), "info");
         return;
       }
@@ -690,9 +702,7 @@
     private teardown(): void {
       this.activeVideoId = null;
       if (this.port !== null) {
-        this.port.postMessage({ type: "stopStream" });
-        this.port.disconnect();
-        this.port = null;
+        this.closeStreamPort();
       }
       if (this.scheduler !== null) {
         this.scheduler.dispose();
@@ -703,8 +713,26 @@
       this.bufferingStartedAt = 0;
       this.translatedAudioReady = false;
       this.streamWindowEnd = null;
+      this.streamRefreshPending = false;
       this.restoreMutedState();
       this.currentVideo = null;
+    }
+
+    private closeStreamPort(): void {
+      if (this.port === null) {
+        return;
+      }
+      try {
+        this.port.postMessage({ type: "stopStream" });
+      } catch {
+        // The background port may already be disconnected after a completed stream.
+      }
+      try {
+        this.port.disconnect();
+      } catch {
+        // Disconnect can throw if Chrome already closed the port.
+      }
+      this.port = null;
     }
 
     private muteCurrentVideo(): void {
@@ -734,6 +762,18 @@
       if (this.bufferingWasPlaying) {
         video.pause();
       }
+    }
+
+    private shouldPauseForInitialBuffering(): boolean {
+      const scheduler = this.scheduler;
+      const video = this.currentVideo;
+      if (scheduler === null || video === null) {
+        return true;
+      }
+      if (!this.translatedAudioReady) {
+        return true;
+      }
+      return scheduler.getBufferedAheadSeconds(video.currentTime) < 2;
     }
 
     private resumeAfterBuffering(): void {

@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     elevenlabs_language_code: str = "de"
 
     windows_sapi_voice: str | None = None
+    windows_sapi_gender: Literal["male", "female", "neutral", "any"] = "male"
     windows_sapi_rate: int = Field(default=0, ge=-10, le=10)
 
     duration_guard_chars_per_second: float = Field(default=14.0, gt=1, le=40)

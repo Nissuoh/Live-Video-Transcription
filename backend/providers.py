@@ -575,20 +575,44 @@ class WindowsSapiTTS(TTSProvider):
             mode="w",
             encoding="utf-8",
         )
-        voice = self._settings.windows_sapi_voice or self._default_voice(target_language)
         script = r"""
 param(
   [Parameter(Mandatory=$true)][string]$Text,
   [Parameter(Mandatory=$true)][string]$OutputPath,
   [string]$VoiceName,
+  [string]$PreferredGender,
+  [string]$CulturePrefix,
   [int]$Rate
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {
+  $selected = $false
   if ($VoiceName) {
-    try { $synth.SelectVoice($VoiceName) } catch {}
+    try {
+      $synth.SelectVoice($VoiceName)
+      $selected = $true
+    } catch {}
+  }
+  if (-not $selected -and $PreferredGender -and $PreferredGender -ne "Any") {
+    $match = $synth.GetInstalledVoices() | Where-Object {
+      $_.Enabled -and
+      $_.VoiceInfo.Gender.ToString() -eq $PreferredGender -and
+      ($_.VoiceInfo.Culture.Name.ToLowerInvariant().StartsWith($CulturePrefix))
+    } | Select-Object -First 1
+    if ($match) {
+      $synth.SelectVoice($match.VoiceInfo.Name)
+      $selected = $true
+    }
+  }
+  if (-not $selected -and $CulturePrefix) {
+    $match = $synth.GetInstalledVoices() | Where-Object {
+      $_.Enabled -and $_.VoiceInfo.Culture.Name.ToLowerInvariant().StartsWith($CulturePrefix)
+    } | Select-Object -First 1
+    if ($match) {
+      $synth.SelectVoice($match.VoiceInfo.Name)
+    }
   }
   $synth.Rate = $Rate
   $synth.SetOutputToWaveFile($OutputPath)
@@ -613,7 +637,11 @@ try {
                 "-OutputPath",
                 output_path,
                 "-VoiceName",
-                voice or "",
+                self._settings.windows_sapi_voice or "",
+                "-PreferredGender",
+                self._sapi_gender(),
+                "-CulturePrefix",
+                _primary_language_subtag(target_language, "de"),
                 "-Rate",
                 str(self._settings.windows_sapi_rate),
                 stdout=asyncio.subprocess.PIPE,
@@ -644,10 +672,15 @@ try {
             except OSError:
                 pass
 
-    def _default_voice(self, target_language: str) -> str | None:
-        if target_language.lower().startswith("de"):
-            return "Microsoft Hedda Desktop"
-        return None
+    def _sapi_gender(self) -> str:
+        gender = self._settings.windows_sapi_gender
+        if gender == "male":
+            return "Male"
+        if gender == "female":
+            return "Female"
+        if gender == "neutral":
+            return "Neutral"
+        return "Any"
 
 
 def build_translation_provider(
