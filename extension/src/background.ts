@@ -284,6 +284,10 @@ import {
     sessions.set(sessionId, session);
 
     socket.addEventListener("open", () => {
+      if (!isCurrentSession(sessionId, session)) {
+        socket.close(1000, "stale stream session");
+        return;
+      }
       const request: StreamRequest = {
         videoId: message.videoId,
         platform: message.platform,
@@ -304,6 +308,9 @@ import {
     });
 
     socket.addEventListener("message", (event) => {
+      if (!isCurrentSession(sessionId, session)) {
+        return;
+      }
       try {
         if (typeof event.data !== "string") {
           throw new Error("WebSocket message was not text JSON");
@@ -320,6 +327,9 @@ import {
 
     socket.addEventListener("close", (event) => {
       clearKeepAlive(session);
+      if (!isCurrentSession(sessionId, session)) {
+        return;
+      }
       sessions.delete(sessionId);
       safePost(port, {
         type: "streamClosed",
@@ -329,8 +339,15 @@ import {
     });
 
     socket.addEventListener("error", () => {
+      if (!isCurrentSession(sessionId, session)) {
+        return;
+      }
       safePost(port, { type: "streamError", error: "WebSocket connection failed" });
     });
+  }
+
+  function isCurrentSession(sessionId: string, session: StreamSession): boolean {
+    return sessions.get(sessionId) === session;
   }
 
   function closeSession(sessionId: string, reason: string): void {

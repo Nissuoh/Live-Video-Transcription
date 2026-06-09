@@ -748,10 +748,22 @@
     }
 
     private requestStreamRefresh(): void {
-      if (this.activeVideoId === null || this.streamRefreshPending || this.streamProcessing) {
+      if (this.activeVideoId === null || this.streamRefreshPending) {
         return;
       }
       this.streamRefreshPending = true;
+      if (this.streamProcessing) {
+        return;
+      }
+      this.queueBootstrap();
+    }
+
+    private restartStreamFromCurrentPlayback(): void {
+      if (this.activeVideoId === null) {
+        return;
+      }
+      this.streamRefreshPending = true;
+      this.closeStreamPort();
       this.queueBootstrap();
     }
 
@@ -779,7 +791,13 @@
         });
       });
       port.onDisconnect.addListener(() => {
-        this.port = null;
+        if (this.port === port) {
+          this.port = null;
+          this.streamProcessing = false;
+          if (this.streamRefreshPending) {
+            this.queueBootstrap();
+          }
+        }
       });
       const request: StreamRequest = {
         videoId,
@@ -816,6 +834,10 @@
           this.restoreMutedState();
           console.error("[Live Video Translation] WebSocket closed", message);
           showStatus(formatStreamClosedStatus(message), "error");
+          return;
+        }
+        if (this.streamRefreshPending) {
+          this.queueBootstrap();
           return;
         }
         this.scheduleStreamRestart();
@@ -953,17 +975,19 @@
       if (this.port === null) {
         return;
       }
+      const port = this.port;
+      this.port = null;
+      this.streamProcessing = false;
       try {
-        this.port.postMessage({ type: "stopStream" });
+        port.postMessage({ type: "stopStream" });
       } catch {
         // The background port may already be disconnected after a completed stream.
       }
       try {
-        this.port.disconnect();
+        port.disconnect();
       } catch {
         // Disconnect can throw if Chrome already closed the port.
       }
-      this.port = null;
     }
 
     private muteCurrentVideo(): void {
@@ -1119,7 +1143,7 @@
       if (this.scheduler !== null) {
         this.scheduler.resetQueue();
       }
-      this.requestStreamRefresh();
+      this.restartStreamFromCurrentPlayback();
     };
   }
 
