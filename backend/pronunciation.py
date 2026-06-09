@@ -76,6 +76,45 @@ ENGLISH_INITIALISMS = {
 DOTTED_INITIALISM_PATTERN = re.compile(
     r"(?<![A-Za-z])(?:[A-Z]\.){2,}[A-Z]?\.?(?![A-Za-z])"
 )
+SPACED_YEAR_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])([12])\s+([0-9])\s+([0-9])\s+([0-9])(?![A-Za-z0-9])"
+)
+STANDALONE_YEAR_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])((?:1[0-9]{3})|(?:20[0-9]{2}))(?![A-Za-z0-9])"
+)
+
+GERMAN_UNDER_20 = {
+    0: "",
+    1: "eins",
+    2: "zwei",
+    3: "drei",
+    4: "vier",
+    5: "fünf",
+    6: "sechs",
+    7: "sieben",
+    8: "acht",
+    9: "neun",
+    10: "zehn",
+    11: "elf",
+    12: "zwölf",
+    13: "dreizehn",
+    14: "vierzehn",
+    15: "fünfzehn",
+    16: "sechzehn",
+    17: "siebzehn",
+    18: "achtzehn",
+    19: "neunzehn",
+}
+GERMAN_TENS = {
+    20: "zwanzig",
+    30: "dreißig",
+    40: "vierzig",
+    50: "fünfzig",
+    60: "sechzig",
+    70: "siebzig",
+    80: "achtzig",
+    90: "neunzig",
+}
 
 
 def normalize_tts_pronunciation(
@@ -89,20 +128,64 @@ def normalize_tts_pronunciation(
 ) -> str:
     if not enabled:
         return text
-    if _effective_mode(mode, tts_provider) == "none":
-        return text
     if not target_language.lower().startswith("de"):
         return text
+    if mode == "none":
+        return text
+
+    normalized = normalize_german_years(text)
+    if _effective_mode(mode, tts_provider) == "none":
+        return normalized
 
     normalized = DOTTED_INITIALISM_PATTERN.sub(
         lambda match: _pronounce_initialism(_letters_only(match.group(0))),
-        text,
+        normalized,
     )
     bare_pattern = _bare_initialism_pattern(english_initialisms or ENGLISH_INITIALISMS)
     return bare_pattern.sub(
         lambda match: _pronounce_initialism(match.group(0)),
         normalized,
     )
+
+
+def normalize_german_years(text: str) -> str:
+    normalized = SPACED_YEAR_PATTERN.sub(
+        lambda match: _year_to_german_words(int("".join(match.groups()))),
+        text,
+    )
+    return STANDALONE_YEAR_PATTERN.sub(
+        lambda match: _year_to_german_words(int(match.group(1))),
+        normalized,
+    )
+
+
+def _year_to_german_words(year: int) -> str:
+    if year == 1000:
+        return "tausend"
+    if 1001 <= year <= 1099:
+        rest = _german_under_100(year - 1000)
+        return f"tausend {rest}".strip()
+    if 1100 <= year <= 1999:
+        century = _german_under_100(year // 100)
+        rest = _german_under_100(year % 100)
+        return f"{century} hundert {rest}".strip()
+    if year == 2000:
+        return "zweitausend"
+    if 2001 <= year <= 2099:
+        rest = _german_under_100(year - 2000)
+        return f"zweitausend {rest}".strip()
+    return str(year)
+
+
+def _german_under_100(value: int) -> str:
+    if value < 20:
+        return GERMAN_UNDER_20[value]
+    tens = (value // 10) * 10
+    ones = value % 10
+    if ones == 0:
+        return GERMAN_TENS[tens]
+    one_word = "ein" if ones == 1 else GERMAN_UNDER_20[ones]
+    return f"{one_word}und{GERMAN_TENS[tens]}"
 
 
 def _letters_only(value: str) -> str:
