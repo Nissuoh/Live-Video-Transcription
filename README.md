@@ -53,6 +53,25 @@ TRANSLATION_PROVIDER=deepl
 TTS_PROVIDER=elevenlabs
 ```
 
+Lokales Open-Source-TTS mit Piper unter Windows:
+
+```powershell
+.\scripts\install-piper-windows.ps1
+```
+
+Die ausgegebenen `PIPER_*` Pfade in `.env` eintragen und den Provider wechseln:
+
+```env
+TTS_PROVIDER=piper
+PIPER_EXE_PATH=C:\...\Live Video Transcription\.runtime\piper\bin\piper\piper.exe
+PIPER_MALE_MODEL_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\de_DE-thorsten-medium\de_DE-thorsten-medium.onnx
+PIPER_MALE_CONFIG_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\de_DE-thorsten-medium\de_DE-thorsten-medium.onnx.json
+PIPER_FEMALE_MODEL_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\de_DE-eva_k-x_low\de_DE-eva_k-x_low.onnx
+PIPER_FEMALE_CONFIG_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\de_DE-eva_k-x_low\de_DE-eva_k-x_low.onnx.json
+```
+
+Piper laeuft lokal auf CPU und nutzt lokale ONNX-Stimmen. Die mitgelieferte lokale Empfehlung ist `de_DE-thorsten-medium` fuer maennlich und `de_DE-eva_k-x_low` fuer weiblich.
+
 OpenRouter als Text-Uebersetzer mit separatem TTS-Provider:
 
 ```env

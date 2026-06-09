@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-import math
 import asyncio
+import io
+import math
 import os
+import shutil
 import tempfile
+import wave
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -46,6 +50,37 @@ def _bounded_rate(value: float, maximum: float) -> float:
     if not math.isfinite(value):
         return 1.0
     return max(1.0, min(maximum, value))
+
+
+def _bounded_scale(value: float, minimum: float, maximum: float) -> float:
+    if not math.isfinite(value):
+        return 1.0
+    return max(minimum, min(maximum, value))
+
+
+def _wav_duration_seconds(audio_bytes: bytes) -> float | None:
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+            frame_rate = wav_file.getframerate()
+            frame_count = wav_file.getnframes()
+            if frame_rate <= 0 or frame_count <= 0:
+                return None
+            return frame_count / frame_rate
+    except (EOFError, wave.Error):
+        return None
+
+
+def _suggested_rate_from_audio_duration(
+    audio_duration_seconds: float | None,
+    target_duration_seconds: float,
+    settings: Settings,
+) -> float:
+    if audio_duration_seconds is None:
+        return 1.0
+    return _bounded_rate(
+        audio_duration_seconds / max(target_duration_seconds, 0.25),
+        settings.tts_max_playback_rate,
+    )
 
 
 def _language_name(language_code: str) -> str:
@@ -566,6 +601,175 @@ class ElevenLabsTTS(TTSProvider):
         )
 
 
+class PiperTTS(TTSProvider):
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        self._settings = settings
+        self._exe_path = self._resolve_executable(settings.piper_exe_path)
+        self._validate_voice_files()
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        target_duration_seconds: float,
+        target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
+    ) -> TTSResult:
+        model_path, config_path = self._voice_files(voice_gender)
+        audio_bytes = await self._synthesize_wav(
+            text,
+            model_path=model_path,
+            config_path=config_path,
+            length_scale=self._length_scale(
+                text,
+                target_duration_seconds=target_duration_seconds,
+                voice_pitch=voice_pitch,
+            ),
+        )
+        suggested_rate = _suggested_rate_from_audio_duration(
+            _wav_duration_seconds(audio_bytes),
+            target_duration_seconds,
+            self._settings,
+        )
+        return TTSResult(
+            audio_bytes=audio_bytes,
+            mime_type="audio/wav",
+            suggested_playback_rate=suggested_rate,
+        )
+
+    def _resolve_executable(self, configured_path: str | None) -> Path:
+        if configured_path is not None and configured_path.strip():
+            exe_path = Path(configured_path).expanduser().resolve()
+            if exe_path.is_file():
+                return exe_path
+            raise ProviderConfigurationError(f"PIPER_EXE_PATH does not exist: {exe_path}")
+
+        discovered = shutil.which("piper") or shutil.which("piper.exe")
+        if discovered is not None:
+            return Path(discovered).resolve()
+        raise ProviderConfigurationError(
+            "Piper TTS requires PIPER_EXE_PATH or a piper executable on PATH"
+        )
+
+    def _validate_voice_files(self) -> None:
+        model_path, config_path = self._voice_files("male")
+        if not model_path.is_file():
+            raise ProviderConfigurationError(f"Piper model file does not exist: {model_path}")
+        if config_path is not None and not config_path.is_file():
+            raise ProviderConfigurationError(f"Piper config file does not exist: {config_path}")
+
+    def _voice_files(self, voice_gender: str) -> tuple[Path, Path | None]:
+        model_value = self._settings.piper_model_path
+        config_value = self._settings.piper_config_path
+        if voice_gender == "male" and self._settings.piper_male_model_path:
+            model_value = self._settings.piper_male_model_path
+            config_value = self._settings.piper_male_config_path
+        elif voice_gender == "female" and self._settings.piper_female_model_path:
+            model_value = self._settings.piper_female_model_path
+            config_value = self._settings.piper_female_config_path
+
+        if model_value is None or not model_value.strip():
+            raise ProviderConfigurationError(
+                "Piper TTS requires PIPER_MODEL_PATH or a gender-specific model path"
+            )
+
+        model_path = Path(model_value).expanduser().resolve()
+        config_path = (
+            Path(config_value).expanduser().resolve()
+            if config_value is not None and config_value.strip()
+            else None
+        )
+        return model_path, config_path
+
+    def _length_scale(
+        self,
+        text: str,
+        *,
+        target_duration_seconds: float,
+        voice_pitch: str,
+    ) -> float:
+        scale = self._settings.piper_length_scale
+        if voice_pitch == "low":
+            scale *= 1.06
+        elif voice_pitch == "high":
+            scale *= 0.94
+
+        estimated_seconds = _estimated_speech_seconds(
+            text,
+            self._settings.piper_estimated_chars_per_second,
+        )
+        if estimated_seconds > target_duration_seconds:
+            scale *= max(0.55, target_duration_seconds / max(estimated_seconds, 0.25))
+
+        return _bounded_scale(
+            scale,
+            self._settings.piper_min_length_scale,
+            self._settings.piper_max_length_scale,
+        )
+
+    async def _synthesize_wav(
+        self,
+        text: str,
+        *,
+        model_path: Path,
+        config_path: Path | None,
+        length_scale: float,
+    ) -> bytes:
+        output = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        output_path = Path(output.name)
+        output.close()
+        args = [
+            str(self._exe_path),
+            "-m",
+            str(model_path),
+            "-f",
+            str(output_path),
+            "--sentence_silence",
+            f"{self._settings.piper_sentence_silence_seconds:.3f}",
+            "--noise_scale",
+            f"{self._settings.piper_noise_scale:.3f}",
+            "--noise_w",
+            f"{self._settings.piper_noise_w:.3f}",
+            "--length_scale",
+            f"{length_scale:.3f}",
+            "-q",
+        ]
+        if config_path is not None:
+            args.extend(["-c", str(config_path)])
+        if self._settings.piper_speaker_id is not None:
+            args.extend(["-s", str(self._settings.piper_speaker_id)])
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(self._exe_path.parent),
+            )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(input=text.encode("utf-8")),
+                timeout=self._settings.provider_timeout_seconds,
+            )
+            if process.returncode != 0:
+                detail = stderr.decode("utf-8", errors="replace") or stdout.decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                raise ProviderRequestError(f"Piper TTS failed: {detail[:1000]}")
+            with output_path.open("rb") as handle:
+                audio_bytes = handle.read()
+            if not audio_bytes:
+                raise ProviderRequestError("Piper TTS produced empty audio")
+            return audio_bytes
+        finally:
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+
+
 class WindowsSapiTTS(TTSProvider):
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
         if os.name != "nt":
@@ -587,13 +791,10 @@ class WindowsSapiTTS(TTSProvider):
             voice_gender=voice_gender,
             voice_pitch=voice_pitch,
         )
-        estimated_seconds = _estimated_speech_seconds(
-            text,
-            self._settings.duration_guard_chars_per_second,
-        )
-        suggested_rate = _bounded_rate(
-            estimated_seconds / max(target_duration_seconds, 0.25),
-            self._settings.tts_max_playback_rate,
+        suggested_rate = _suggested_rate_from_audio_duration(
+            _wav_duration_seconds(audio_bytes),
+            target_duration_seconds,
+            self._settings,
         )
         return TTSResult(
             audio_bytes=audio_bytes,
@@ -766,6 +967,8 @@ def build_tts_provider(settings: Settings, client: httpx.AsyncClient) -> TTSProv
         return OpenAITTS(settings, client)
     if settings.tts_provider == "elevenlabs":
         return ElevenLabsTTS(settings, client)
+    if settings.tts_provider == "piper":
+        return PiperTTS(settings, client)
     if settings.tts_provider == "windows_sapi":
         return WindowsSapiTTS(settings, client)
     raise ProviderConfigurationError(f"Unsupported TTS provider: {settings.tts_provider}")

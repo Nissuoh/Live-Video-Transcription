@@ -45,14 +45,19 @@ class TranslationPipeline:
         ]
 
         completed = 0
+        next_index = 0
+        pending_chunks: dict[int, StreamChunk] = {}
         try:
             while completed < item_count:
-                _index, chunk, error = await result_queue.get()
+                index, chunk, error = await result_queue.get()
                 completed += 1
                 if error is not None:
                     raise error
                 assert chunk is not None
-                await send_chunk(chunk)
+                pending_chunks[index] = chunk
+                while next_index in pending_chunks:
+                    await send_chunk(pending_chunks.pop(next_index))
+                    next_index += 1
         finally:
             for worker in workers:
                 if not worker.done():

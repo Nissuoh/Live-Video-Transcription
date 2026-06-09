@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     auth_tokens: str = Field(min_length=1)
     translation_provider: Literal["openai", "deepl", "openrouter"] = "openai"
-    tts_provider: Literal["openai", "elevenlabs", "windows_sapi"] = "openai"
+    tts_provider: Literal["openai", "elevenlabs", "windows_sapi", "piper"] = "openai"
 
     max_chunk_concurrency: int = Field(default=1, ge=1, le=16)
     max_transcript_items: int = Field(default=2000, ge=1, le=20000)
@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     elevenlabs_model_id: str = "eleven_multilingual_v2"
     elevenlabs_output_format: str = "mp3_44100_128"
     elevenlabs_language_code: str = "de"
+
+    piper_exe_path: str | None = None
+    piper_model_path: str | None = None
+    piper_config_path: str | None = None
+    piper_male_model_path: str | None = None
+    piper_male_config_path: str | None = None
+    piper_female_model_path: str | None = None
+    piper_female_config_path: str | None = None
+    piper_speaker_id: int | None = None
+    piper_sentence_silence_seconds: float = Field(default=0.05, ge=0, le=2)
+    piper_length_scale: float = Field(default=1.0, gt=0, le=3)
+    piper_min_length_scale: float = Field(default=0.72, gt=0, le=3)
+    piper_max_length_scale: float = Field(default=1.15, gt=0, le=3)
+    piper_estimated_chars_per_second: float = Field(default=18.0, gt=1, le=60)
+    piper_noise_scale: float = Field(default=0.667, ge=0, le=2)
+    piper_noise_w: float = Field(default=0.8, ge=0, le=2)
 
     windows_sapi_voice: str | None = None
     windows_sapi_gender: Literal["male", "female", "neutral", "any"] = "male"
