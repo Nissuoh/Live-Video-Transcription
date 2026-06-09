@@ -82,10 +82,14 @@ def normalize_tts_pronunciation(
     text: str,
     *,
     target_language: str,
+    tts_provider: str,
     enabled: bool = True,
+    mode: str = "auto",
     english_initialisms: Iterable[str] | None = None,
 ) -> str:
     if not enabled:
+        return text
+    if _effective_mode(mode, tts_provider) == "none":
         return text
     if not target_language.lower().startswith("de"):
         return text
@@ -109,6 +113,16 @@ def _pronounce_initialism(value: str) -> str:
     letters = _letters_only(value)
     names = [ENGLISH_LETTER_NAMES[letter] for letter in letters if letter in ENGLISH_LETTER_NAMES]
     return ", ".join(names) if names else value
+
+
+def _effective_mode(mode: str, tts_provider: str) -> str:
+    if mode == "none":
+        return "none"
+    if mode == "phonetic":
+        return "phonetic"
+    if tts_provider in {"openai", "elevenlabs", "edge_tts", "gemini"}:
+        return "none"
+    return "phonetic"
 
 
 def _bare_initialism_pattern(initialisms: Iterable[str]) -> re.Pattern[str]:

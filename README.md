@@ -46,6 +46,41 @@ TRANSLATION_PROVIDER=openai
 TTS_PROVIDER=openai
 ```
 
+Empfohlen fuer natuerliches Deutsch mit englischen Begriffen:
+
+```env
+TTS_PROVIDER=edge_tts
+EDGE_TTS_MALE_VOICE=de-DE-ConradNeural
+EDGE_TTS_FEMALE_VOICE=de-DE-KatjaNeural
+TTS_PRONUNCIATION_MODE=auto
+```
+
+`edge_tts` nutzt Microsofts Edge Neural Voices ohne separaten API-Key und ist fuer lokale Tests aktuell die beste sofort nutzbare Qualitaetsoption. Fuer Produktivbetrieb muss dieser externe Sprachdienst in der Datenschutzerklaerung offengelegt werden.
+
+OpenAI TTS bleibt vorbereitet. Sobald dein OpenAI-Projekt Zugriff auf TTS-Modelle hat:
+
+```env
+TTS_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TTS_MALE_VOICE=onyx
+OPENAI_TTS_FEMALE_VOICE=coral
+TTS_PRONUNCIATION_MODE=auto
+```
+
+Gemini TTS ist ebenfalls vorbereitet:
+
+```env
+TTS_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_TTS_MODEL=gemini-2.5-flash-tts
+GEMINI_TTS_MALE_VOICE=Puck
+GEMINI_TTS_FEMALE_VOICE=Kore
+TTS_PRONUNCIATION_MODE=auto
+```
+
+In diesen Modi bleiben Begriffe wie `CIA`, `FBI`, `NSA`, `AI`, `GPU`, `URL` und `VPN` im Text erhalten und werden durch die Neural-TTS-Modelle selbst ausgesprochen. Die phonetische Umschreibung wird automatisch nur fuer lokale TTS-Engines wie Piper oder Windows SAPI genutzt.
+
 Alternativen:
 
 ```env
@@ -72,7 +107,7 @@ PIPER_FEMALE_CONFIG_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\d
 
 Piper laeuft lokal auf CPU und nutzt lokale ONNX-Stimmen. Die mitgelieferte lokale Empfehlung ist `de_DE-thorsten-medium` fuer maennlich und `de_DE-eva_k-x_low` fuer weiblich.
 
-Vor der Sprachausgabe normalisiert das Backend haeufige englische Initialismen fuer deutsche TTS-Stimmen. Dadurch werden Begriffe wie `C.I.A.`, `FBI`, `NSA`, `AI`, `GPU`, `URL` oder `VPN` nicht als deutsche Woerter gelesen, sondern als englisch klingende Buchstabenfolge gesprochen. Die Liste ist ueber `TTS_ENGLISH_INITIALISMS` in `.env` erweiterbar; mit `TTS_PRONUNCIATION_ENABLED=false` kann die Normalisierung deaktiviert werden.
+Vor der Sprachausgabe normalisiert das Backend haeufige englische Initialismen fuer lokale deutsche TTS-Stimmen. Dadurch werden Begriffe wie `C.I.A.`, `FBI`, `NSA`, `AI`, `GPU`, `URL` oder `VPN` mit Piper/Windows nicht als deutsche Woerter gelesen, sondern als englisch klingende Buchstabenfolge gesprochen. Die Liste ist ueber `TTS_ENGLISH_INITIALISMS` in `.env` erweiterbar; mit `TTS_PRONUNCIATION_ENABLED=false` kann die Normalisierung deaktiviert werden. `TTS_PRONUNCIATION_MODE=auto` deaktiviert diese Umschreibung automatisch fuer OpenAI und ElevenLabs.
 
 OpenRouter als Text-Uebersetzer mit separatem TTS-Provider:
 

@@ -103,7 +103,9 @@ class TranslationPipeline:
         spoken_text = normalize_tts_pronunciation(
             translated_text,
             target_language=target_language,
+            tts_provider=self._settings.tts_provider,
             enabled=self._settings.tts_pronunciation_enabled,
+            mode=self._settings.tts_pronunciation_mode,
             english_initialisms=self._settings.english_initialism_values,
         )
         speech = await self._tts.synthesize(

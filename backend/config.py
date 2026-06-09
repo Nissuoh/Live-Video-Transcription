@@ -23,7 +23,14 @@ class Settings(BaseSettings):
 
     auth_tokens: str = Field(min_length=1)
     translation_provider: Literal["openai", "deepl", "openrouter"] = "openai"
-    tts_provider: Literal["openai", "elevenlabs", "windows_sapi", "piper"] = "openai"
+    tts_provider: Literal[
+        "openai",
+        "elevenlabs",
+        "edge_tts",
+        "gemini",
+        "windows_sapi",
+        "piper",
+    ] = "openai"
 
     max_chunk_concurrency: int = Field(default=1, ge=1, le=16)
     max_transcript_items: int = Field(default=2000, ge=1, le=20000)
@@ -43,7 +50,10 @@ class Settings(BaseSettings):
     openai_tts_female_voice: str = "coral"
     openai_tts_response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     openai_tts_instructions: str = (
-        "Sprich klares, natuerliches Deutsch mit ruhiger Synchronisationsgeschwindigkeit."
+        "Sprich klares, natuerliches Hochdeutsch mit ruhiger Synchronisationsgeschwindigkeit. "
+        "Englische Akronyme, Agenturnamen und Tech-Begriffe wie CIA, FBI, NSA, AI, API, GPU, "
+        "URL, VPN, USB, HTML und HTTPS werden auf Englisch ausgesprochen oder buchstabiert. "
+        "Eigennamen und Produktnamen nicht eindeutschen."
     )
     openai_max_output_tokens: int = Field(default=220, ge=16, le=2000)
     openai_temperature: float = Field(default=0.2, ge=0, le=2)
@@ -65,6 +75,27 @@ class Settings(BaseSettings):
     elevenlabs_model_id: str = "eleven_multilingual_v2"
     elevenlabs_output_format: str = "mp3_44100_128"
     elevenlabs_language_code: str = "de"
+
+    edge_tts_male_voice: str = "de-DE-ConradNeural"
+    edge_tts_female_voice: str = "de-DE-KatjaNeural"
+    edge_tts_default_voice: str = "de-DE-ConradNeural"
+    edge_tts_rate: str = "+0%"
+    edge_tts_volume: str = "+0%"
+    edge_tts_pitch_normal: str = "+0Hz"
+    edge_tts_pitch_low: str = "-25Hz"
+    edge_tts_pitch_high: str = "+25Hz"
+
+    gemini_api_key: SecretStr | None = None
+    gemini_tts_model: str = "gemini-2.5-flash-tts"
+    gemini_tts_male_voice: str = "Puck"
+    gemini_tts_female_voice: str = "Kore"
+    gemini_tts_sample_rate: int = Field(default=24000, ge=8000, le=48000)
+    gemini_tts_instructions: str = (
+        "Sprich klares, natuerliches Hochdeutsch. Englische Akronyme, Agenturnamen "
+        "und Tech-Begriffe wie CIA, FBI, NSA, AI, API, GPU, URL, VPN, USB, HTML "
+        "und HTTPS werden auf Englisch ausgesprochen oder buchstabiert. Eigennamen "
+        "und Produktnamen nicht eindeutschen."
+    )
 
     piper_exe_path: str | None = None
     piper_model_path: str | None = None
@@ -89,6 +120,7 @@ class Settings(BaseSettings):
     duration_guard_chars_per_second: float = Field(default=14.0, gt=1, le=40)
     tts_max_playback_rate: float = Field(default=1.35, ge=1.0, le=4.0)
     tts_pronunciation_enabled: bool = True
+    tts_pronunciation_mode: Literal["auto", "phonetic", "none"] = "auto"
     tts_english_initialisms: str = (
         "ADHD,AGI,AI,API,AR,BIOS,CIA,CPU,CSS,CTO,FBI,FPS,GPU,HTML,HTTP,HTTPS,"
         "IT,JSON,LLM,ML,NATO,NSA,OS,PDF,RAM,REST,SQL,UI,UK,URL,US,USA,USB,"

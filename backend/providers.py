@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import edge_tts
 
 from .config import Settings
 from .interfaces import TTSProvider, TTSResult, TranslationProvider
@@ -68,6 +69,22 @@ def _wav_duration_seconds(audio_bytes: bytes) -> float | None:
             return frame_count / frame_rate
     except (EOFError, wave.Error):
         return None
+
+
+def _wav_from_pcm(
+    pcm_bytes: bytes,
+    *,
+    sample_rate: int = 24000,
+    channels: int = 1,
+    sample_width: int = 2,
+) -> bytes:
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm_bytes)
+    return output.getvalue()
 
 
 def _suggested_rate_from_audio_duration(
@@ -601,6 +618,159 @@ class ElevenLabsTTS(TTSProvider):
         )
 
 
+class EdgeTTS(TTSProvider):
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        self._settings = settings
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        target_duration_seconds: float,
+        target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
+    ) -> TTSResult:
+        audio_parts: list[bytes] = []
+        communicate = edge_tts.Communicate(
+            text,
+            voice=self._voice(voice_gender),
+            rate=self._settings.edge_tts_rate,
+            volume=self._settings.edge_tts_volume,
+            pitch=self._pitch(voice_pitch),
+            receive_timeout=int(self._settings.provider_timeout_seconds),
+        )
+        try:
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio":
+                    data = chunk.get("data")
+                    if isinstance(data, bytes):
+                        audio_parts.append(data)
+        except Exception as exc:
+            raise ProviderRequestError(f"Edge TTS failed: {exc}") from exc
+
+        audio_bytes = b"".join(audio_parts)
+        if not audio_bytes:
+            raise ProviderRequestError("Edge TTS produced empty audio")
+
+        estimated_seconds = _estimated_speech_seconds(
+            text,
+            self._settings.duration_guard_chars_per_second,
+        )
+        suggested_rate = _bounded_rate(
+            estimated_seconds / max(target_duration_seconds, 0.25),
+            self._settings.tts_max_playback_rate,
+        )
+        return TTSResult(
+            audio_bytes=audio_bytes,
+            mime_type="audio/mpeg",
+            suggested_playback_rate=suggested_rate,
+        )
+
+    def _voice(self, voice_gender: str) -> str:
+        if voice_gender == "male":
+            return self._settings.edge_tts_male_voice or self._settings.edge_tts_default_voice
+        if voice_gender == "female":
+            return self._settings.edge_tts_female_voice or self._settings.edge_tts_default_voice
+        return self._settings.edge_tts_default_voice
+
+    def _pitch(self, voice_pitch: str) -> str:
+        if voice_pitch == "low":
+            return self._settings.edge_tts_pitch_low
+        if voice_pitch == "high":
+            return self._settings.edge_tts_pitch_high
+        return self._settings.edge_tts_pitch_normal
+
+
+class GeminiTTS(TTSProvider):
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        self._settings = settings
+        self._api_key = _secret_value(settings.gemini_api_key, "GEMINI_API_KEY")
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        target_duration_seconds: float,
+        target_language: str = "de",
+        voice_gender: str = "male",
+        voice_pitch: str = "normal",
+    ) -> TTSResult:
+        audio_bytes = await asyncio.to_thread(
+            self._request_speech,
+            text,
+            voice_gender=voice_gender,
+            voice_pitch=voice_pitch,
+        )
+        suggested_rate = _suggested_rate_from_audio_duration(
+            _wav_duration_seconds(audio_bytes),
+            target_duration_seconds,
+            self._settings,
+        )
+        return TTSResult(
+            audio_bytes=audio_bytes,
+            mime_type="audio/wav",
+            suggested_playback_rate=suggested_rate,
+        )
+
+    def _request_speech(
+        self,
+        text: str,
+        *,
+        voice_gender: str,
+        voice_pitch: str,
+    ) -> bytes:
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError as exc:
+            raise ProviderConfigurationError(
+                "Gemini TTS requires google-genai; install requirements.txt"
+            ) from exc
+
+        client = genai.Client(api_key=self._api_key)
+        response = client.models.generate_content(
+            model=self._settings.gemini_tts_model,
+            contents=self._gemini_prompt(text, voice_gender=voice_gender, voice_pitch=voice_pitch),
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=self._voice(voice_gender),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        try:
+            pcm_bytes = response.candidates[0].content.parts[0].inline_data.data
+        except (AttributeError, IndexError, TypeError) as exc:
+            raise ProviderRequestError("Gemini TTS response did not contain audio") from exc
+        if not isinstance(pcm_bytes, bytes) or not pcm_bytes:
+            raise ProviderRequestError("Gemini TTS produced empty audio")
+        return _wav_from_pcm(
+            pcm_bytes,
+            sample_rate=self._settings.gemini_tts_sample_rate,
+        )
+
+    def _gemini_prompt(self, text: str, *, voice_gender: str, voice_pitch: str) -> str:
+        parts = [self._settings.gemini_tts_instructions.strip()]
+        parts.append("Nutze eine maennliche Stimme." if voice_gender == "male" else "Nutze eine weibliche Stimme.")
+        if voice_pitch == "low":
+            parts.append("Sprich mit tieferer Tonlage.")
+        elif voice_pitch == "high":
+            parts.append("Sprich mit hoeherer Tonlage.")
+        parts.append("Lies exakt diesen Text vor:")
+        parts.append(text)
+        return " ".join(part for part in parts if part)
+
+    def _voice(self, voice_gender: str) -> str:
+        if voice_gender == "female":
+            return self._settings.gemini_tts_female_voice
+        return self._settings.gemini_tts_male_voice
+
+
 class PiperTTS(TTSProvider):
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
         self._settings = settings
@@ -967,6 +1137,10 @@ def build_tts_provider(settings: Settings, client: httpx.AsyncClient) -> TTSProv
         return OpenAITTS(settings, client)
     if settings.tts_provider == "elevenlabs":
         return ElevenLabsTTS(settings, client)
+    if settings.tts_provider == "edge_tts":
+        return EdgeTTS(settings, client)
+    if settings.tts_provider == "gemini":
+        return GeminiTTS(settings, client)
     if settings.tts_provider == "piper":
         return PiperTTS(settings, client)
     if settings.tts_provider == "windows_sapi":
