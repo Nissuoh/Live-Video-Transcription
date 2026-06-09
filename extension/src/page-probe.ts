@@ -36,7 +36,12 @@
     if (event.source !== window || !isProbeRequest(event.data)) {
       return;
     }
-    const playerResponse = sanitizePlayerResponse(readCurrentPlayerResponse());
+    let playerResponse: PlayerResponseLike | null = null;
+    try {
+      playerResponse = sanitizePlayerResponse(readCurrentPlayerResponse());
+    } catch (error: unknown) {
+      console.warn("[Live Video Translation probe]", error);
+    }
     window.postMessage(
       {
         source: "lvt-page-probe",
@@ -144,16 +149,30 @@
   function readYtcfgData(): Record<string, unknown> {
     const pageWindow = window as Window & {
       ytcfg?: {
-        data_?: () => unknown;
-        get?: (key: string) => unknown;
+        data_?: unknown;
+        get?: unknown;
       };
     };
-    const data = pageWindow.ytcfg?.data_?.();
-    if (isRecord(data)) {
-      return data;
+    const config = pageWindow.ytcfg;
+    if (config === undefined) {
+      return {};
     }
-    const apiKey = pageWindow.ytcfg?.get?.("INNERTUBE_API_KEY");
-    const context = pageWindow.ytcfg?.get?.("INNERTUBE_CONTEXT");
+    if (typeof config.data_ === "function") {
+      const data = config.data_();
+      if (isRecord(data)) {
+        return data;
+      }
+    }
+    if (isRecord(config.data_)) {
+      return config.data_;
+    }
+    const getter = config.get;
+    const getConfigValue =
+      typeof getter === "function"
+        ? (key: string): unknown => getter(key)
+        : (_key: string): unknown => undefined;
+    const apiKey = getConfigValue("INNERTUBE_API_KEY");
+    const context = getConfigValue("INNERTUBE_CONTEXT");
     return {
       INNERTUBE_API_KEY: apiKey,
       INNERTUBE_CONTEXT: context,
