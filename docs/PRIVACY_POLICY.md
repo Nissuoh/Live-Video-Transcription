@@ -10,7 +10,7 @@ The extension processes only the data required for this feature:
 
 - The current YouTube video identifier.
 - Available YouTube caption text, caption timing, and caption language metadata.
-- Extension settings stored locally in Chrome extension storage, including backend WebSocket URL, API/Auth token, source language, target language, and automatic translation preference.
+- Extension settings stored locally in Chrome extension storage, including backend WebSocket URL, API/Auth token, interface language, source language, target language, voice preferences, pitch-preservation preference, and automatic translation preference.
 
 The extension does not collect YouTube video files, YouTube audio files, passwords, payment card data, emails, private messages, unrelated page content, mouse position, keyboard input, or browsing history outside the YouTube translation feature.
 

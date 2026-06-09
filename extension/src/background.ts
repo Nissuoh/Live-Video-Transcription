@@ -22,6 +22,7 @@ import {
     targetLanguage: string;
     voiceGender: VoiceGender;
     voicePitch: VoicePitch;
+    preserveVoicePitch: boolean;
     transcript: TranscriptItem[];
   }
 
@@ -55,10 +56,13 @@ import {
     autoTranslate?: boolean;
     sourceLanguage?: string;
     targetLanguage?: string;
+    uiLanguage?: UiLanguage;
     voiceGender?: VoiceGender;
     voicePitch?: VoicePitch;
+    preserveVoicePitch?: boolean;
   }
 
+  type UiLanguage = "system" | "en" | "de" | "fr";
   type VoiceGender = "male" | "female";
   type VoicePitch = "normal" | "high" | "low";
 
@@ -74,8 +78,10 @@ import {
     "autoTranslate",
     "sourceLanguage",
     "targetLanguage",
+    "uiLanguage",
     "voiceGender",
     "voicePitch",
+    "preserveVoicePitch",
   ] as const;
   const STREAM_PORT_NAME = "translation-stream";
   const KEEPALIVE_INTERVAL_MS = 20_000;
@@ -116,11 +122,17 @@ import {
     if (typeof existing.targetLanguage !== "string") {
       defaults.targetLanguage = "de";
     }
+    if (typeof existing.uiLanguage !== "string") {
+      defaults.uiLanguage = "system";
+    }
     if (typeof existing.voiceGender !== "string") {
       defaults.voiceGender = "male";
     }
     if (typeof existing.voicePitch !== "string") {
       defaults.voicePitch = "normal";
+    }
+    if (typeof existing.preserveVoicePitch !== "boolean") {
+      defaults.preserveVoicePitch = true;
     }
     if (Object.keys(defaults).length > 0) {
       await chrome.storage.local.set(defaults);
@@ -189,16 +201,20 @@ import {
       typeof config.targetLanguage === "string" && config.targetLanguage.trim().length > 0
         ? config.targetLanguage.trim()
         : "de";
+    const uiLanguage = parseUiLanguage(config.uiLanguage);
     const voiceGender = parseVoiceGender(config.voiceGender);
     const voicePitch = parseVoicePitch(config.voicePitch);
+    const preserveVoicePitch = config.preserveVoicePitch !== false;
     return {
       ok: true,
       enabled,
       configured: enabled && authToken.length > 0 && isAllowedBackendStreamUrl(backendWssUrl),
       sourceLanguage,
       targetLanguage,
+      uiLanguage,
       voiceGender,
       voicePitch,
+      preserveVoicePitch,
     };
   }
 
@@ -324,16 +340,20 @@ import {
       typeof stored.sourceLanguage === "string" ? stored.sourceLanguage.trim() : "en";
     const targetLanguage =
       typeof stored.targetLanguage === "string" ? stored.targetLanguage.trim() : "de";
+    const uiLanguage = parseUiLanguage(stored.uiLanguage);
     const voiceGender = parseVoiceGender(stored.voiceGender);
     const voicePitch = parseVoicePitch(stored.voicePitch);
+    const preserveVoicePitch = stored.preserveVoicePitch !== false;
     return {
       authToken,
       backendWssUrl,
       autoTranslate: true,
       sourceLanguage: sourceLanguage || "en",
       targetLanguage: targetLanguage || "de",
+      uiLanguage,
       voiceGender,
       voicePitch,
+      preserveVoicePitch,
     };
   }
 
@@ -344,6 +364,7 @@ import {
     const targetLanguage = value.targetLanguage;
     const voiceGender = value.voiceGender;
     const voicePitch = value.voicePitch;
+    const preserveVoicePitch = value.preserveVoicePitch;
     const transcript = value.transcript;
     if (
       typeof videoId !== "string" ||
@@ -353,6 +374,7 @@ import {
       typeof targetLanguage !== "string" ||
       (voiceGender !== "male" && voiceGender !== "female") ||
       (voicePitch !== "normal" && voicePitch !== "high" && voicePitch !== "low") ||
+      typeof preserveVoicePitch !== "boolean" ||
       !Array.isArray(transcript)
     ) {
       throw new Error("Invalid startStream message");
@@ -365,6 +387,7 @@ import {
       targetLanguage,
       voiceGender,
       voicePitch,
+      preserveVoicePitch,
       transcript: transcript.map(parseTranscriptItem),
     };
   }
@@ -427,6 +450,10 @@ import {
 
   function parseVoiceGender(value: unknown): VoiceGender {
     return value === "female" ? "female" : "male";
+  }
+
+  function parseUiLanguage(value: unknown): UiLanguage {
+    return value === "de" || value === "fr" || value === "en" ? value : "system";
   }
 
   function parseVoicePitch(value: unknown): VoicePitch {

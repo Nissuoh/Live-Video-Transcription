@@ -89,7 +89,7 @@ extension-unpacked
   - Website content.
   - Web browsing activity limited to current YouTube video context.
   - Authentication information.
-  - User settings.
+  - User settings, including interface language, source/target language, voice, and pitch-preservation preferences.
 - Remote code answer: `No remote code`.
 - Permission justifications:
   - `storage`: stores backend URL, auth token, language, voice, and enablement settings.

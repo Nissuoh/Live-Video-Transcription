@@ -15,10 +15,13 @@ import {
     autoTranslate?: boolean;
     sourceLanguage?: string;
     targetLanguage?: string;
+    uiLanguage?: UiLanguage;
     voiceGender?: VoiceGender;
     voicePitch?: VoicePitch;
+    preserveVoicePitch?: boolean;
   }
 
+  type UiLanguage = "system" | "en" | "de" | "fr";
   type VoiceGender = "male" | "female";
   type VoicePitch = "normal" | "high" | "low";
 
@@ -28,10 +31,13 @@ import {
     "autoTranslate",
     "sourceLanguage",
     "targetLanguage",
+    "uiLanguage",
     "voiceGender",
     "voicePitch",
+    "preserveVoicePitch",
   ] as const;
 
+  const SUPPORTED_UI_LANGUAGES: readonly UiLanguage[] = ["system", "en", "de", "fr"];
   const LANGUAGE_CODES: readonly string[] = [
     "ar",
     "da",
@@ -71,6 +77,9 @@ import {
     configurationLoadedStatus: "Configuration loaded.",
     configurationSummary: "Backend: $1. Token: $2 chars, SHA-256: $3.",
     hideTokenButton: "Hide token",
+    interfaceSection: "Interface",
+    uiLanguageLabel: "Interface language",
+    uiLanguageSystem: "Use browser language",
     languageSection: "Language",
     missingElementError: "Missing required element: $1",
     optionsSubtitle: "Secure backend configuration for synchronized YouTube audio translation.",
@@ -87,6 +96,7 @@ import {
     voiceGenderFemale: "Female",
     voiceGenderLabel: "Voice gender",
     voiceGenderMale: "Male",
+    preserveVoicePitchLabel: "Keep voice pitch when YouTube speed changes",
     voicePitchHigh: "High",
     voicePitchLabel: "Pitch",
     voicePitchLow: "Low",
@@ -94,27 +104,30 @@ import {
     voiceSection: "Voice",
   };
 
+  let activeUiLanguage: UiLanguage = "system";
+  let activeMessages: Record<string, string> = {};
+
   const form = requireElement("#options-form", HTMLFormElement);
   const backendField = requireElement("#backend-field", HTMLDivElement);
   const backendInput = requireElement("#backend-wss-url", HTMLInputElement);
   const tokenInput = requireElement("#auth-token", HTMLInputElement);
+  const uiLanguageInput = requireElement("#ui-language", HTMLSelectElement);
   const sourceLanguageInput = requireElement("#source-language", HTMLSelectElement);
   const targetLanguageInput = requireElement("#target-language", HTMLSelectElement);
   const voiceGenderInput = requireElement("#voice-gender", HTMLSelectElement);
   const voicePitchInput = requireElement("#voice-pitch", HTMLSelectElement);
+  const preserveVoicePitchInput = requireElement("#preserve-voice-pitch", HTMLInputElement);
   const autoTranslateInput = requireElement("#auto-translate", HTMLInputElement);
   const revealButton = requireElement("#reveal-token", HTMLButtonElement);
   const status = requireElement("#status", HTMLParagraphElement);
 
-  applyLocalization();
-  applyBackendDefaults();
-  populateLanguageSelect(sourceLanguageInput, "en");
-  populateLanguageSelect(targetLanguageInput, "de");
-  void loadOptions();
-
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void saveOptions();
+  });
+
+  uiLanguageInput.addEventListener("change", () => {
+    void applySelectedUiLanguage();
   });
 
   revealButton.addEventListener("click", () => {
@@ -123,13 +136,24 @@ import {
       tokenInput.type === "password" ? message("showTokenButton") : message("hideTokenButton");
   });
 
-  async function loadOptions(): Promise<void> {
+  void initialize();
+
+  async function initialize(): Promise<void> {
     const storage = getStorage();
     if (storage === null) {
       setStatus(message("storageUnavailableError"), "error");
       return;
     }
     const config = (await storage.get([...CONFIG_KEYS])) as ExtensionConfig;
+    activeUiLanguage = parseUiLanguage(config.uiLanguage);
+    activeMessages = await loadMessagesForUiLanguage(activeUiLanguage);
+    applyLocalization();
+    applyBackendDefaults();
+    populateUiLanguageSelect(activeUiLanguage);
+    loadOptions(config);
+  }
+
+  function loadOptions(config: ExtensionConfig): void {
     const sourceLanguage =
       typeof config.sourceLanguage === "string" ? config.sourceLanguage : "en";
     const targetLanguage =
@@ -139,11 +163,13 @@ import {
     backendInput.value = resolveBackendWssUrl(config.backendWssUrl);
     tokenInput.value = resolveBackendAccessToken(config.authToken);
     autoTranslateInput.checked = config.autoTranslate === true;
+    preserveVoicePitchInput.checked = config.preserveVoicePitch !== false;
+    uiLanguageInput.value = activeUiLanguage;
     populateLanguageSelect(sourceLanguageInput, sourceLanguage);
     populateLanguageSelect(targetLanguageInput, targetLanguage);
     voiceGenderInput.value = voiceGender;
     voicePitchInput.value = voicePitch;
-    await setConfigStatus(message("configurationLoadedStatus"), "ok");
+    void setConfigStatus(message("configurationLoadedStatus"), "ok");
   }
 
   async function saveOptions(): Promise<void> {
@@ -157,8 +183,10 @@ import {
     const autoTranslate = autoTranslateInput.checked;
     const sourceLanguage = sourceLanguageInput.value;
     const targetLanguage = targetLanguageInput.value;
+    const uiLanguage = parseUiLanguage(uiLanguageInput.value);
     const voiceGender = parseVoiceGender(voiceGenderInput.value);
     const voicePitch = parseVoicePitch(voicePitchInput.value);
+    const preserveVoicePitch = preserveVoicePitchInput.checked;
     try {
       if (backendWssUrl.length > 0 || autoTranslate) {
         assertWssUrl(backendWssUrl);
@@ -172,9 +200,17 @@ import {
         autoTranslate,
         sourceLanguage,
         targetLanguage,
+        uiLanguage,
         voiceGender,
         voicePitch,
+        preserveVoicePitch,
       });
+      activeUiLanguage = uiLanguage;
+      activeMessages = await loadMessagesForUiLanguage(activeUiLanguage);
+      applyLocalization();
+      populateUiLanguageSelect(activeUiLanguage);
+      populateLanguageSelect(sourceLanguageInput, sourceLanguage);
+      populateLanguageSelect(targetLanguageInput, targetLanguage);
       await notifyActiveYouTubeTab();
       await setConfigStatus(message("savedStatus"), "ok");
     } catch (error: unknown) {
@@ -183,7 +219,7 @@ import {
   }
 
   function applyLocalization(): void {
-    const locale = getUiLocale();
+    const locale = getEffectiveUiLocale();
     document.documentElement.lang = locale;
     document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => {
       const key = element.dataset.i18n;
@@ -199,6 +235,8 @@ import {
           element.placeholder = message(key);
         }
       });
+    revealButton.textContent =
+      tokenInput.type === "password" ? message("showTokenButton") : message("hideTokenButton");
   }
 
   function applyBackendDefaults(): void {
@@ -218,7 +256,7 @@ import {
   }
 
   function populateLanguageSelect(select: HTMLSelectElement, selectedLanguage: string): void {
-    const locale = getUiLocale();
+    const locale = getEffectiveUiLocale();
     const uniqueCodes = Array.from(new Set([...LANGUAGE_CODES, selectedLanguage]));
     const options = uniqueCodes
       .filter((code) => code.trim().length > 0)
@@ -239,7 +277,7 @@ import {
   }
 
   function formatLanguageLabel(languageCode: string): string {
-    const locale = getUiLocale();
+    const locale = getEffectiveUiLocale();
     try {
       const displayNames = new Intl.DisplayNames([locale], { type: "language" });
       const localizedName = displayNames.of(languageCode);
@@ -250,6 +288,35 @@ import {
       // Intl.DisplayNames can be unavailable in non-Chrome preview contexts.
     }
     return languageCode.toUpperCase();
+  }
+
+  function populateUiLanguageSelect(selectedLanguage: UiLanguage): void {
+    const fragment = document.createDocumentFragment();
+    for (const language of SUPPORTED_UI_LANGUAGES) {
+      const option = document.createElement("option");
+      option.value = language;
+      option.textContent =
+        language === "system" ? message("uiLanguageSystem") : formatLanguageLabel(language);
+      fragment.append(option);
+    }
+    uiLanguageInput.replaceChildren(fragment);
+    uiLanguageInput.value = selectedLanguage;
+  }
+
+  async function applySelectedUiLanguage(): Promise<void> {
+    const selectedLanguage = parseUiLanguage(uiLanguageInput.value);
+    const sourceLanguage = sourceLanguageInput.value || "en";
+    const targetLanguage = targetLanguageInput.value || "de";
+    activeUiLanguage = selectedLanguage;
+    activeMessages = await loadMessagesForUiLanguage(activeUiLanguage);
+    applyLocalization();
+    populateUiLanguageSelect(activeUiLanguage);
+    populateLanguageSelect(sourceLanguageInput, sourceLanguage);
+    populateLanguageSelect(targetLanguageInput, targetLanguage);
+  }
+
+  function parseUiLanguage(value: unknown): UiLanguage {
+    return value === "de" || value === "fr" || value === "en" ? value : "system";
   }
 
   function parseVoiceGender(value: unknown): VoiceGender {
@@ -346,7 +413,60 @@ import {
     return navigator.languages[0] ?? navigator.language ?? "en";
   }
 
+  function getEffectiveUiLocale(): string {
+    if (activeUiLanguage !== "system") {
+      return activeUiLanguage;
+    }
+    return getUiLocale();
+  }
+
+  async function loadMessagesForUiLanguage(uiLanguage: UiLanguage): Promise<Record<string, string>> {
+    const browserLocale = normalizeLocale(getUiLocale());
+    const requestedLocale = uiLanguage === "system" ? browserLocale : uiLanguage;
+    return {
+      ...(await loadLocaleMessages("en")),
+      ...(requestedLocale === "en" ? {} : await loadLocaleMessages(requestedLocale)),
+    };
+  }
+
+  async function loadLocaleMessages(locale: string): Promise<Record<string, string>> {
+    if (typeof chrome === "undefined" || chrome.runtime?.getURL === undefined) {
+      return {};
+    }
+    try {
+      const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/messages.json`));
+      if (!response.ok) {
+        return {};
+      }
+      const raw = (await response.json()) as Record<string, { message?: string }>;
+      const messages: Record<string, string> = {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value.message === "string") {
+          messages[key] = value.message;
+        }
+      }
+      return messages;
+    } catch {
+      return {};
+    }
+  }
+
+  function normalizeLocale(locale: string): string {
+    const normalized = locale.trim().toLowerCase();
+    if (normalized.startsWith("de")) {
+      return "de";
+    }
+    if (normalized.startsWith("fr")) {
+      return "fr";
+    }
+    return "en";
+  }
+
   function message(key: string, substitutions?: string | string[]): string {
+    const configured = activeMessages[key];
+    if (configured !== undefined && configured.trim().length > 0) {
+      return interpolateMessage(configured, substitutions);
+    }
     if (typeof chrome !== "undefined" && chrome.i18n?.getMessage !== undefined) {
       const localized = chrome.i18n.getMessage(key, substitutions);
       if (localized.trim().length > 0) {
@@ -354,13 +474,21 @@ import {
       }
     }
     const fallback = FALLBACK_MESSAGES[key] ?? key;
+    return interpolateMessage(fallback, substitutions);
+  }
+
+  function interpolateMessage(messageTemplate: string, substitutions?: string | string[]): string {
     if (substitutions === undefined) {
-      return fallback;
+      return messageTemplate;
     }
     const values = Array.isArray(substitutions) ? substitutions : [substitutions];
     return values.reduce(
-      (current, value, index) => current.replace(`$${index + 1}`, value),
-      fallback,
+      (current, value, index) =>
+        current
+          .replaceAll(`$${index + 1}`, value)
+          .replaceAll(`$${index + 1}$`, value)
+          .replaceAll(index === 0 ? "$SELECTOR$" : `$ARG${index + 1}$`, value),
+      messageTemplate,
     );
   }
 

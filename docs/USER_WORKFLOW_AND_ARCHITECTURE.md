@@ -7,8 +7,10 @@
 3. The user clicks the extension icon.
 4. The popup shows:
    - API/Auth token.
+   - Interface language.
    - Source language, rendered in the user's browser language.
    - Target language, rendered in the user's browser language.
+   - Voice gender, pitch, and pitch preservation for YouTube speed changes.
    - Enable automatic translation on YouTube.
 5. The user saves the settings.
 6. The content script detects the current YouTube video and caption track automatically.
@@ -26,8 +28,9 @@ Chrome runs the packaged extension JavaScript:
 - Main-world YouTube player probe.
 - Manifest V3 service worker.
 - Web Audio playback and synchronization.
-- Localized popup/options UI through Chrome `_locales`.
+- Localized popup/options UI through stored `uiLanguage` and bundled `_locales`.
 - Localized language names through `Intl.DisplayNames`.
+- Pitch-preserving Web Audio synchronization when YouTube playback speed changes.
 
 Chrome does not run Python FastAPI code and does not host a Python server by itself.
 
@@ -80,9 +83,13 @@ The default local quality recommendation is `TTS_PROVIDER=edge_tts` because it g
 
 ## Language Display
 
-The extension stores stable language codes such as `en` and `de`. It does not store translated display labels.
+The extension stores stable language codes such as `en` and `de`. It does not store translated display labels for source and target languages.
 
-The popup renders language names through the browser's locale. For example, target language `de` is shown as `Deutsch` in a German browser, `German` in an English browser, `aleman` in a Spanish browser, and `allemand` in a French browser.
+The popup and options UI store `uiLanguage` separately from source and target language. Current shipped UI languages are browser default, English, German, and French. Source and target language names are rendered through `Intl.DisplayNames` in the selected interface language where Chrome supports it.
+
+## Playback Speed And Pitch
+
+YouTube playback speed and translated speech speed stay synchronized. With `preserveVoicePitch=true`, the content script does local time-compression before scheduling each translated audio chunk. This keeps a low or male voice from becoming artificially high at 1.25x, 1.5x, or 2x playback speed.
 
 ## Production Shape
 

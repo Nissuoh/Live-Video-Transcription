@@ -1,6 +1,8 @@
 # Live Video Translation
 
-## Struktur
+Chrome Manifest V3 extension plus FastAPI WebSocket backend for translating available YouTube captions into synchronized AI-generated speech.
+
+## Repository Structure
 
 ```text
 .
@@ -16,18 +18,22 @@
 |   |-- _locales
 |   |-- manifest.json
 |   |-- package.json
+|   |-- popup.html
+|   |-- options.html
 |   |-- tsconfig.json
 |   `-- src
 |       |-- background.ts
 |       |-- content.ts
+|       |-- defaults.ts
 |       |-- options.ts
 |       `-- page-probe.ts
 |-- docs
+|-- scripts
 |-- .env.example
 `-- requirements.txt
 ```
 
-## Backend
+## Backend Setup
 
 ```powershell
 python -m venv .venv
@@ -37,16 +43,16 @@ Copy-Item .env.example .env
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-Fuer Produktion `REQUIRE_WSS=true` lassen und TLS/WSS am Reverse Proxy terminieren. Der Proxy muss `X-Forwarded-Proto=https` oder `wss` setzen.
+Keep `REQUIRE_WSS=true` in production and terminate TLS/WSS at the reverse proxy. The proxy must forward `X-Forwarded-Proto=https` or `wss`.
 
-Provider-Auswahl:
+Provider selection is controlled through `.env`:
 
 ```env
 TRANSLATION_PROVIDER=openai
-TTS_PROVIDER=openai
+TTS_PROVIDER=edge_tts
 ```
 
-Empfohlen fuer natuerliches Deutsch mit englischen Begriffen:
+Recommended local quality setup for German speech with mixed English terms:
 
 ```env
 TTS_PROVIDER=edge_tts
@@ -55,9 +61,9 @@ EDGE_TTS_FEMALE_VOICE=de-DE-KatjaNeural
 TTS_PRONUNCIATION_MODE=auto
 ```
 
-`edge_tts` nutzt Microsofts Edge Neural Voices ohne separaten API-Key und ist fuer lokale Tests aktuell die beste sofort nutzbare Qualitaetsoption. Fuer Produktivbetrieb muss dieser externe Sprachdienst in der Datenschutzerklaerung offengelegt werden.
+`edge_tts` uses Microsoft Edge neural voices and does not need a separate TTS API key. If this provider is used in production, disclose Microsoft Edge neural text-to-speech in the privacy policy.
 
-OpenAI TTS bleibt vorbereitet. Sobald dein OpenAI-Projekt Zugriff auf TTS-Modelle hat:
+OpenAI TTS is ready when the OpenAI project has TTS model access:
 
 ```env
 TTS_PROVIDER=openai
@@ -68,7 +74,7 @@ OPENAI_TTS_FEMALE_VOICE=coral
 TTS_PRONUNCIATION_MODE=auto
 ```
 
-Gemini TTS ist ebenfalls vorbereitet:
+Gemini TTS is also supported:
 
 ```env
 TTS_PROVIDER=gemini
@@ -79,22 +85,22 @@ GEMINI_TTS_FEMALE_VOICE=Kore
 TTS_PRONUNCIATION_MODE=auto
 ```
 
-In diesen Modi bleiben Begriffe wie `CIA`, `FBI`, `NSA`, `AI`, `GPU`, `URL` und `VPN` im Text erhalten und werden durch die Neural-TTS-Modelle selbst ausgesprochen. Die phonetische Umschreibung wird automatisch nur fuer lokale TTS-Engines wie Piper oder Windows SAPI genutzt.
-
-Alternativen:
+OpenRouter can be used for text translation and compression while a separate TTS provider generates audio:
 
 ```env
-TRANSLATION_PROVIDER=deepl
-TTS_PROVIDER=elevenlabs
+TRANSLATION_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
+TTS_PROVIDER=edge_tts
 ```
 
-Lokales Open-Source-TTS mit Piper unter Windows:
+Local open-source TTS with Piper on Windows:
 
 ```powershell
 .\scripts\install-piper-windows.ps1
 ```
 
-Die ausgegebenen `PIPER_*` Pfade in `.env` eintragen und den Provider wechseln:
+Copy the printed `PIPER_*` paths into `.env`:
 
 ```env
 TTS_PROVIDER=piper
@@ -105,19 +111,7 @@ PIPER_FEMALE_MODEL_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\de
 PIPER_FEMALE_CONFIG_PATH=C:\...\Live Video Transcription\.runtime\piper\voices\de_DE-eva_k-x_low\de_DE-eva_k-x_low.onnx.json
 ```
 
-Piper laeuft lokal auf CPU und nutzt lokale ONNX-Stimmen. Die mitgelieferte lokale Empfehlung ist `de_DE-thorsten-medium` fuer maennlich und `de_DE-eva_k-x_low` fuer weiblich.
-
-Vor der Sprachausgabe normalisiert das Backend haeufige englische Initialismen fuer lokale deutsche TTS-Stimmen. Dadurch werden Begriffe wie `C.I.A.`, `FBI`, `NSA`, `AI`, `GPU`, `URL` oder `VPN` mit Piper/Windows nicht als deutsche Woerter gelesen, sondern als englisch klingende Buchstabenfolge gesprochen. Die Liste ist ueber `TTS_ENGLISH_INITIALISMS` in `.env` erweiterbar; mit `TTS_PRONUNCIATION_ENABLED=false` kann die Normalisierung deaktiviert werden. `TTS_PRONUNCIATION_MODE=auto` deaktiviert diese Umschreibung automatisch fuer OpenAI, ElevenLabs, Edge TTS und Gemini.
-
-OpenRouter als Text-Uebersetzer mit separatem TTS-Provider:
-
-```env
-TRANSLATION_PROVIDER=openrouter
-OPENROUTER_API_KEY=sk-or-...
-OPENROUTER_MODEL=openai/gpt-4o-mini
-TTS_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-```
+The backend keeps provider API keys server-side. Do not put OpenAI, DeepL, OpenRouter, ElevenLabs, Gemini, or other provider keys into the extension package.
 
 ## Chrome Extension
 
@@ -128,64 +122,82 @@ npm run build
 npm run package
 ```
 
-Danach den Ordner `extension` in `chrome://extensions` als unpacked extension laden oder `extension/webstore/live-video-translation.zip` fuer den Chrome Web Store verwenden.
+Chrome Web Store upload artifact:
 
-Die Extension erwartet in `chrome.storage.local`:
-
-```json
-{
-  "authToken": "token-aus-AUTH_TOKENS",
-  "backendWssUrl": "wss://deine-domain.example/stream",
-  "autoTranslate": true,
-  "sourceLanguage": "en",
-  "targetLanguage": "de"
-}
+```text
+extension/webstore/live-video-translation.zip
 ```
 
-Die Extension akzeptiert nur `wss://` URLs fuer das Backend. YouTube-Seite, aktuelles Video und Caption-Track werden automatisch erkannt; im Popup wird kein Video-Link eingegeben. Automatische Uebersetzung startet erst, wenn sie im Popup aktiviert und gueltig konfiguriert wurde.
-
-Fuer den Produktmodus kann die Backend-URL in [extension/src/defaults.ts](extension/src/defaults.ts) als `DEFAULT_BACKEND_WSS_URL` gesetzt werden. Dann muss der Nutzer im Popup nur noch API/Auth-Token, Sprachwahl und Aktivierung bedienen. Ohne gesetzte Produkt-URL bleibt das Backend-Feld sichtbar, damit lokal oder mit einem Tunnel getestet werden kann.
-
-Die UI nutzt Chrome `_locales` fuer statische Texte und `Intl.DisplayNames` fuer Sprachbezeichnungen. Dadurch wird `de` je nach Browser-Sprache als `Deutsch`, `German`, `aleman` oder entsprechend lokal angezeigt.
-
-## Lokaler End-to-End-Test
-
-1. `.env` anlegen oder bearbeiten.
-2. Provider konfigurieren:
-
-```env
-AUTH_TOKENS=local-dev-token
-TRANSLATION_PROVIDER=openai
-TTS_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-```
-
-Oder OpenRouter fuer Text plus OpenAI TTS:
-
-```env
-AUTH_TOKENS=local-dev-token
-TRANSLATION_PROVIDER=openrouter
-OPENROUTER_API_KEY=sk-or-...
-OPENROUTER_MODEL=openai/gpt-4o-mini
-TTS_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-```
-
-3. Backend starten:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-uvicorn backend.main:app --host 127.0.0.1 --port 8000
-```
-
-4. Lokale Extension bauen:
+Local unpacked development build:
 
 ```powershell
 cd extension
 npm run local:unpacked
 ```
 
-5. In `chrome://extensions` den Ordner `extension-unpacked` laden oder neu laden.
-6. Im Popup `local-dev-token` eintragen, automatische Uebersetzung aktivieren und auf YouTube testen.
+Load `extension-unpacked` in `chrome://extensions` only for local testing.
 
-Siehe [docs/USER_WORKFLOW_AND_ARCHITECTURE.md](docs/USER_WORKFLOW_AND_ARCHITECTURE.md) fuer den vollstaendigen Nutzer- und Systemablauf.
+Stored extension configuration:
+
+```json
+{
+  "authToken": "token-from-AUTH_TOKENS",
+  "backendWssUrl": "wss://your-domain.example/stream",
+  "autoTranslate": true,
+  "sourceLanguage": "en",
+  "targetLanguage": "de",
+  "uiLanguage": "system",
+  "voiceGender": "male",
+  "voicePitch": "low",
+  "preserveVoicePitch": true
+}
+```
+
+The extension accepts production backends only over `wss://.../stream`. Local development may use `ws://127.0.0.1:8000/stream`.
+
+The current YouTube page, video id, and caption track are detected automatically. The user does not paste a YouTube URL into the extension. Automatic translation starts only after the user saves a valid backend token and enables translation.
+
+The popup and options UI support selectable interface language through `uiLanguage`. Current shipped UI languages are:
+
+- Browser default
+- English
+- German
+- French
+
+Source and target language labels are rendered through `Intl.DisplayNames`, so language names match the selected interface language where the browser supports it.
+
+`preserveVoicePitch` is enabled by default. When the user changes YouTube playback speed to 1.25x, 1.5x, or 2x, translated speech stays synchronized while the content script locally time-compresses audio so a low male voice does not become artificially high.
+
+For a public production build, set `DEFAULT_BACKEND_WSS_URL` in [extension/src/defaults.ts](extension/src/defaults.ts). Then users only enter the backend access token, choose languages and voice settings, and enable translation.
+
+## Local End-to-End Test
+
+1. Create `.env` from `.env.example`.
+2. Configure a backend auth token and providers:
+
+```env
+AUTH_TOKENS=local-dev-token
+TRANSLATION_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+TTS_PROVIDER=edge_tts
+```
+
+3. Start the backend:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+4. Build the local extension:
+
+```powershell
+cd extension
+npm run local:unpacked
+```
+
+5. Load `extension-unpacked` in `chrome://extensions`.
+6. Open a YouTube video with captions.
+7. Open the extension popup, save `local-dev-token`, enable automatic translation, and test playback.
+
+See [docs/USER_WORKFLOW_AND_ARCHITECTURE.md](docs/USER_WORKFLOW_AND_ARCHITECTURE.md) for the full user and system workflow.

@@ -59,6 +59,9 @@
   "voiceGenderFemale": {
     "message": "Female"
   },
+  "preserveVoicePitchLabel": {
+    "message": "Keep voice pitch when YouTube speed changes"
+  },
   "voicePitchLabel": {
     "message": "Pitch"
   },
@@ -85,6 +88,15 @@
   },
   "hideTokenButton": {
     "message": "Hide token"
+  },
+  "interfaceSection": {
+    "message": "Interface"
+  },
+  "uiLanguageLabel": {
+    "message": "Interface language"
+  },
+  "uiLanguageSystem": {
+    "message": "Use browser language"
   },
   "savedStatus": {
     "message": "Saved."

@@ -14,6 +14,7 @@
     targetLanguage: string;
     voiceGender: VoiceGender;
     voicePitch: VoicePitch;
+    preserveVoicePitch: boolean;
     transcript: TranscriptItem[];
   }
 
@@ -32,6 +33,7 @@
     targetLanguage?: string;
     voiceGender?: string;
     voicePitch?: string;
+    preserveVoicePitch?: boolean;
     error?: string;
   }
 
@@ -42,6 +44,7 @@
     targetLanguage: string;
     voiceGender: VoiceGender;
     voicePitch: VoicePitch;
+    preserveVoicePitch: boolean;
   }
 
   type VoiceGender = "male" | "female";
@@ -92,6 +95,7 @@
     end: number;
     playbackRate: number;
     buffer: AudioBuffer;
+    stretchedBuffers: Map<string, AudioBuffer>;
   }
 
   interface StatusAction {
@@ -118,6 +122,11 @@
   const STATUS_COPY_RESET_MS = 1600;
   const TRANSCRIPT_PANEL_WAIT_MS = 12000;
   const TRANSCRIPT_PANEL_POLL_MS = 250;
+  const PITCH_PRESERVE_RATE_EPSILON = 0.02;
+  const TIME_STRETCH_WINDOW_SECONDS = 0.04;
+  const TIME_STRETCH_MIN_FRAME_SIZE = 512;
+  const TIME_STRETCH_MAX_FRAME_SIZE = 4096;
+  const TIME_STRETCH_CACHE_LIMIT = 4;
   const STREAM_PORT_NAME = "translation-stream";
   const FALLBACK_MESSAGES: Record<string, string> = {
     adWaitingStatus: "Waiting for the YouTube ad to finish before starting translation.",
@@ -144,6 +153,7 @@
   class AudioChunkScheduler {
     private readonly video: HTMLVideoElement;
     private readonly onAudioStateChanged: (state: AudioContextState) => void;
+    private readonly preserveVoicePitch: boolean;
     private readonly chunks = new Map<number, DecodedAudioChunk>();
     private readonly scheduledKeys = new Set<number>();
     private readonly activeSources = new Map<AudioBufferSourceNode, number>();
@@ -152,9 +162,14 @@
     private animationFrameId: number | null = null;
     private nextScheduledContextTime = 0;
 
-    constructor(video: HTMLVideoElement, onAudioStateChanged: (state: AudioContextState) => void) {
+    constructor(
+      video: HTMLVideoElement,
+      onAudioStateChanged: (state: AudioContextState) => void,
+      preserveVoicePitch: boolean,
+    ) {
       this.video = video;
       this.onAudioStateChanged = onAudioStateChanged;
+      this.preserveVoicePitch = preserveVoicePitch;
       this.video.addEventListener("play", this.onPlaybackResumed);
       this.video.addEventListener("pause", this.onPlaybackInterrupted);
       this.video.addEventListener("seeking", this.onPlaybackInterrupted);
@@ -170,6 +185,7 @@
         end: chunk.end,
         playbackRate: chunk.suggestedPlaybackRate,
         buffer,
+        stretchedBuffers: new Map(),
       });
       this.startLoop();
     }
@@ -268,8 +284,14 @@
     };
 
     private readonly onRateChanged = (): void => {
+      if (this.preserveVoicePitch) {
+        this.stopActiveSources();
+        this.scheduledKeys.clear();
+        this.startLoop();
+        return;
+      }
       for (const [source, chunkRate] of this.activeSources) {
-        source.playbackRate.value = Math.max(0.25, Math.min(4, this.video.playbackRate * chunkRate));
+        source.playbackRate.value = clampPlaybackRate(this.video.playbackRate * chunkRate);
       }
     };
 
@@ -343,12 +365,11 @@
         console.warn("[Live Video Translation] AudioContext resume failed", error);
         this.notifyAudioState();
       });
+      const effectivePlaybackRate = clampPlaybackRate(this.video.playbackRate * chunk.playbackRate);
+      const playbackBuffer = this.resolvePlaybackBuffer(context, chunk, effectivePlaybackRate);
       const source = context.createBufferSource();
-      source.buffer = chunk.buffer;
-      source.playbackRate.value = Math.max(
-        0.25,
-        Math.min(4, this.video.playbackRate * chunk.playbackRate),
-      );
+      source.buffer = playbackBuffer;
+      source.playbackRate.value = this.preserveVoicePitch ? 1 : effectivePlaybackRate;
       source.connect(gainNode);
       source.onended = () => {
         this.activeSources.delete(source);
@@ -356,13 +377,13 @@
 
       const startDelay = Math.max(0, chunk.start - currentTime);
       const requestedWhen = context.currentTime + startDelay;
-      const audioOffset = calculateAudioOffset(chunk, currentTime);
+      const audioOffset = calculateAudioOffset(chunk, playbackBuffer, currentTime);
       const when = Math.max(requestedWhen, this.nextScheduledContextTime);
       this.activeSources.set(source, chunk.playbackRate);
       this.scheduledKeys.add(key);
       try {
         source.start(when, audioOffset);
-        const remainingSeconds = Math.max(0, chunk.buffer.duration - audioOffset);
+        const remainingSeconds = Math.max(0, playbackBuffer.duration - audioOffset);
         this.nextScheduledContextTime = Math.max(
           this.nextScheduledContextTime,
           when + remainingSeconds / source.playbackRate.value,
@@ -371,6 +392,37 @@
         this.activeSources.delete(source);
         console.warn("[Live Video Translation] Audio source scheduling failed", error);
       }
+    }
+
+    private resolvePlaybackBuffer(
+      context: AudioContext,
+      chunk: DecodedAudioChunk,
+      effectivePlaybackRate: number,
+    ): AudioBuffer {
+      if (
+        !this.preserveVoicePitch ||
+        Math.abs(effectivePlaybackRate - 1) <= PITCH_PRESERVE_RATE_EPSILON
+      ) {
+        return chunk.buffer;
+      }
+      const cacheKey = quantizePlaybackRate(effectivePlaybackRate).toFixed(2);
+      const cachedBuffer = chunk.stretchedBuffers.get(cacheKey);
+      if (cachedBuffer !== undefined) {
+        return cachedBuffer;
+      }
+      const stretchedBuffer = createPitchPreservedBuffer(
+        context,
+        chunk.buffer,
+        Number.parseFloat(cacheKey),
+      );
+      if (chunk.stretchedBuffers.size >= TIME_STRETCH_CACHE_LIMIT) {
+        const oldestKey = chunk.stretchedBuffers.keys().next().value as string | undefined;
+        if (oldestKey !== undefined) {
+          chunk.stretchedBuffers.delete(oldestKey);
+        }
+      }
+      chunk.stretchedBuffers.set(cacheKey, stretchedBuffer);
+      return stretchedBuffer;
     }
 
     private stopActiveSources(): void {
@@ -514,7 +566,11 @@
       this.streamWindowEnd = transcriptWindowEnd(playbackTranscript);
       this.activeVideoId = videoId;
       if (this.scheduler === null) {
-        this.scheduler = new AudioChunkScheduler(video, this.onAudioStateChanged);
+        this.scheduler = new AudioChunkScheduler(
+          video,
+          this.onAudioStateChanged,
+          runState.preserveVoicePitch,
+        );
       }
       this.openStream(
         videoId,
@@ -523,6 +579,7 @@
         targetLanguage,
         voiceGender,
         voicePitch,
+        runState.preserveVoicePitch,
       );
     }
 
@@ -589,6 +646,7 @@
       targetLanguage: string,
       voiceGender: VoiceGender,
       voicePitch: VoicePitch,
+      preserveVoicePitch: boolean,
     ): void {
       const port = chrome.runtime.connect({ name: STREAM_PORT_NAME });
       this.port = port;
@@ -607,6 +665,7 @@
         targetLanguage,
         voiceGender,
         voicePitch,
+        preserveVoicePitch,
         transcript,
       };
       port.postMessage({ type: "startStream", ...request });
@@ -918,6 +977,7 @@
             : "de",
         voiceGender: parseVoiceGender(response.voiceGender),
         voicePitch: parseVoicePitch(response.voicePitch),
+        preserveVoicePitch: response.preserveVoicePitch !== false,
       };
     } catch {
       return defaultRunState();
@@ -932,6 +992,7 @@
       targetLanguage: "de",
       voiceGender: "male",
       voicePitch: "normal",
+      preserveVoicePitch: true,
     };
   }
 
@@ -2195,16 +2256,126 @@
     );
   }
 
-  function calculateAudioOffset(chunk: DecodedAudioChunk, currentTime: number): number {
-    if (currentTime <= chunk.start || chunk.buffer.duration <= 0) {
+  function calculateAudioOffset(
+    chunk: DecodedAudioChunk,
+    playbackBuffer: AudioBuffer,
+    currentTime: number,
+  ): number {
+    if (currentTime <= chunk.start || playbackBuffer.duration <= 0) {
       return 0;
     }
     const chunkDuration = Math.max(0.001, chunk.end - chunk.start);
     const elapsedRatio = Math.max(0, Math.min(0.95, (currentTime - chunk.start) / chunkDuration));
     return Math.min(
-      chunk.buffer.duration * elapsedRatio,
-      Math.max(0, chunk.buffer.duration - 0.02),
+      playbackBuffer.duration * elapsedRatio,
+      Math.max(0, playbackBuffer.duration - 0.02),
     );
+  }
+
+  function createPitchPreservedBuffer(
+    context: AudioContext,
+    input: AudioBuffer,
+    playbackRate: number,
+  ): AudioBuffer {
+    const rate = clampPlaybackRate(playbackRate);
+    if (Math.abs(rate - 1) <= PITCH_PRESERVE_RATE_EPSILON || input.length <= 1) {
+      return input;
+    }
+    const outputLength = Math.max(1, Math.round(input.length / rate));
+    const output = context.createBuffer(input.numberOfChannels, outputLength, input.sampleRate);
+    const frameSize = chooseTimeStretchFrameSize(input.sampleRate, input.length);
+    const synthesisHop = Math.max(64, Math.round(frameSize / 4));
+    const analysisHop = synthesisHop * rate;
+    const window = createHannWindow(frameSize);
+
+    for (let channel = 0; channel < input.numberOfChannels; channel += 1) {
+      const source: Float32Array<ArrayBuffer> = new Float32Array(input.length);
+      input.copyFromChannel(source, channel);
+      const rendered = renderTimeStretchedChannel(
+        source,
+        outputLength,
+        frameSize,
+        synthesisHop,
+        analysisHop,
+        window,
+      );
+      output.copyToChannel(rendered, channel);
+    }
+    return output;
+  }
+
+  function renderTimeStretchedChannel(
+    source: Float32Array<ArrayBuffer>,
+    outputLength: number,
+    frameSize: number,
+    synthesisHop: number,
+    analysisHop: number,
+    window: Float32Array<ArrayBuffer>,
+  ): Float32Array<ArrayBuffer> {
+    const renderLength = outputLength + frameSize + synthesisHop;
+    const mix: Float32Array<ArrayBuffer> = new Float32Array(renderLength);
+    const weights: Float32Array<ArrayBuffer> = new Float32Array(renderLength);
+    let frameIndex = 0;
+
+    while (true) {
+      const inputPosition = Math.round(frameIndex * analysisHop);
+      const outputPosition = frameIndex * synthesisHop;
+      if (inputPosition >= source.length || outputPosition >= renderLength) {
+        break;
+      }
+      const available = Math.min(
+        frameSize,
+        source.length - inputPosition,
+        renderLength - outputPosition,
+      );
+      for (let index = 0; index < available; index += 1) {
+        const weight = window[index] ?? 1;
+        const outputIndex = outputPosition + index;
+        mix[outputIndex] = (mix[outputIndex] ?? 0) + (source[inputPosition + index] ?? 0) * weight;
+        weights[outputIndex] = (weights[outputIndex] ?? 0) + weight;
+      }
+      frameIndex += 1;
+    }
+
+    const output: Float32Array<ArrayBuffer> = new Float32Array(outputLength);
+    for (let index = 0; index < outputLength; index += 1) {
+      const weight = weights[index] ?? 0;
+      const mixed = mix[index] ?? 0;
+      const value = weight > 0.0001 ? mixed / weight : mixed;
+      output[index] = Math.max(-1, Math.min(1, value));
+    }
+    return output;
+  }
+
+  function chooseTimeStretchFrameSize(sampleRate: number, inputLength: number): number {
+    const target = Math.round(sampleRate * TIME_STRETCH_WINDOW_SECONDS);
+    return Math.max(
+      TIME_STRETCH_MIN_FRAME_SIZE,
+      Math.min(TIME_STRETCH_MAX_FRAME_SIZE, Math.max(2, inputLength), target),
+    );
+  }
+
+  function createHannWindow(length: number): Float32Array<ArrayBuffer> {
+    const window: Float32Array<ArrayBuffer> = new Float32Array(length);
+    if (length <= 1) {
+      window.fill(1);
+      return window;
+    }
+    for (let index = 0; index < length; index += 1) {
+      window[index] = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / (length - 1));
+    }
+    return window;
+  }
+
+  function quantizePlaybackRate(playbackRate: number): number {
+    return Math.round(clampPlaybackRate(playbackRate) * 20) / 20;
+  }
+
+  function clampPlaybackRate(value: number): number {
+    if (!Number.isFinite(value)) {
+      return 1;
+    }
+    return Math.max(0.25, Math.min(4, value));
   }
 
   function base64ToArrayBuffer(value: string): ArrayBuffer {

@@ -24,7 +24,7 @@ The backend may transmit caption text to the configured translation and text-to-
 
 ## Storage
 
-The extension stores configuration locally in Chrome extension storage. Provider API keys are never stored in the extension and must remain on the backend.
+The extension stores configuration locally in Chrome extension storage, including interface language, source/target language, voice preferences, pitch-preservation preference, backend URL, and backend access token. Provider API keys are never stored in the extension and must remain on the backend.
 
 ## Security
 

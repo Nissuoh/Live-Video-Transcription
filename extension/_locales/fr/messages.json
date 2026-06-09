@@ -1,0 +1,199 @@
+{
+  "appName": {
+    "message": "Live Video Translation"
+  },
+  "appDescription": {
+    "message": "Diffuse une voix traduite synchronisée pour les sous-titres YouTube via un backend WebSocket sécurisé."
+  },
+  "productEyebrow": {
+    "message": "Traducteur audio YouTube"
+  },
+  "popupSubtitle": {
+    "message": "La vidéo YouTube actuelle est détectée automatiquement lorsque la traduction est activée."
+  },
+  "optionsSubtitle": {
+    "message": "Configuration backend sécurisée pour la traduction audio YouTube synchronisée."
+  },
+  "connectionSection": {
+    "message": "Connexion"
+  },
+  "configurationLoadedStatus": {
+    "message": "Configuration chargée."
+  },
+  "configurationSummary": {
+    "message": "Backend : $1. Jeton : $2 caractères, SHA-256 : $3."
+  },
+  "languageSection": {
+    "message": "Langue"
+  },
+  "automationSection": {
+    "message": "Automatisation"
+  },
+  "backendUrlLabel": {
+    "message": "URL WebSocket du backend"
+  },
+  "backendUrlPlaceholder": {
+    "message": "wss://example.com/stream"
+  },
+  "authTokenLabel": {
+    "message": "Jeton d'accès au backend"
+  },
+  "authTokenPlaceholder": {
+    "message": "Jeton accepté par votre backend"
+  },
+  "sourceLanguageLabel": {
+    "message": "De"
+  },
+  "targetLanguageLabel": {
+    "message": "Vers"
+  },
+  "voiceSection": {
+    "message": "Voix"
+  },
+  "voiceGenderLabel": {
+    "message": "Type de voix"
+  },
+  "voiceGenderMale": {
+    "message": "Masculine"
+  },
+  "voiceGenderFemale": {
+    "message": "Féminine"
+  },
+  "preserveVoicePitchLabel": {
+    "message": "Conserver la hauteur de la voix quand la vitesse YouTube change"
+  },
+  "voicePitchLabel": {
+    "message": "Hauteur"
+  },
+  "voicePitchNormal": {
+    "message": "Normale"
+  },
+  "voicePitchLow": {
+    "message": "Grave"
+  },
+  "voicePitchHigh": {
+    "message": "Aiguë"
+  },
+  "autoTranslateLabel": {
+    "message": "Activer la traduction automatique sur YouTube"
+  },
+  "aiDisclosure": {
+    "message": "La voix traduite est générée par IA et envoyée via votre backend configuré."
+  },
+  "saveButton": {
+    "message": "Enregistrer"
+  },
+  "showTokenButton": {
+    "message": "Afficher le jeton"
+  },
+  "hideTokenButton": {
+    "message": "Masquer le jeton"
+  },
+  "interfaceSection": {
+    "message": "Interface"
+  },
+  "uiLanguageLabel": {
+    "message": "Langue de l'interface"
+  },
+  "uiLanguageSystem": {
+    "message": "Utiliser la langue du navigateur"
+  },
+  "savedStatus": {
+    "message": "Enregistré."
+  },
+  "storageUnavailableError": {
+    "message": "Le stockage de l'extension Chrome n'est pas disponible dans ce contexte."
+  },
+  "tokenRequiredError": {
+    "message": "Le jeton d'accès au backend est requis lorsque la traduction automatique est activée."
+  },
+  "settingsInvalidError": {
+    "message": "Les paramètres ne sont pas valides."
+  },
+  "backendWssError": {
+    "message": "L'URL du backend doit utiliser wss:// ou ws://localhost en local."
+  },
+  "backendStreamPathError": {
+    "message": "L'URL du backend doit pointer vers /stream."
+  },
+  "notConfiguredStatus": {
+    "message": "La traduction en direct est activée, mais elle n'est pas configurée. Ouvrez le popup de l'extension."
+  },
+  "metadataError": {
+    "message": "Impossible de lire les métadonnées de la vidéo YouTube actuelle."
+  },
+  "videoIdError": {
+    "message": "Impossible d'identifier la vidéo YouTube actuelle."
+  },
+  "captionsUnavailableError": {
+    "message": "Aucune piste de sous-titres n'est disponible pour la langue sélectionnée."
+  },
+  "captionsEmptyError": {
+    "message": "La piste de sous-titres sélectionnée est vide."
+  },
+  "adWaitingStatus": {
+    "message": "Attente de la fin de la publicité YouTube avant de démarrer la traduction."
+  },
+  "audioBlockedStatus": {
+    "message": "Cliquez une fois sur Activer l'audio pour autoriser Chrome à lire la voix traduite dans cet onglet YouTube."
+  },
+  "audioReadyStatus": {
+    "message": "L'audio traduit est actif. Si vous n'entendez rien, cliquez sur Tester le son."
+  },
+  "enableAudioButton": {
+    "message": "Activer l'audio"
+  },
+  "testAudioButton": {
+    "message": "Tester le son"
+  },
+  "connectionClosedError": {
+    "message": "La connexion de traduction en direct s'est fermée de manière inattendue."
+  },
+  "copyErrorButton": {
+    "message": "Copier l'erreur"
+  },
+  "copiedErrorButton": {
+    "message": "Copié"
+  },
+  "disabledStatus": {
+    "message": "Live Video Translation est prêt. Ouvrez l'extension, saisissez le jeton, activez la traduction et enregistrez."
+  },
+  "preparingAudioStatus": {
+    "message": "La traduction en direct prépare l'audio."
+  },
+  "runtimeUnknownError": {
+    "message": "Erreur d'exécution inconnue"
+  },
+  "unsupportedMessageError": {
+    "message": "Message non pris en charge"
+  },
+  "untrustedSenderError": {
+    "message": "Expéditeur non approuvé"
+  },
+  "invalidContentMessageError": {
+    "message": "Message du script de contenu non valide"
+  },
+  "unknownStreamError": {
+    "message": "Erreur de flux inconnue"
+  },
+  "streamMessageUnsupportedError": {
+    "message": "Message du script de contenu non pris en charge"
+  },
+  "autoTranslationDisabledError": {
+    "message": "La traduction automatique est désactivée."
+  },
+  "missingTokenError": {
+    "message": "Jeton d'accès au backend manquant. Ouvrez les options de l'extension et enregistrez un jeton."
+  },
+  "backendUrlInvalidError": {
+    "message": "L'URL du backend doit utiliser wss:// ou ws://localhost en local et pointer vers /stream"
+  },
+  "missingElementError": {
+    "message": "Élément requis manquant : $SELECTOR$",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  }
+}

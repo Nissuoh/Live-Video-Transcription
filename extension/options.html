@@ -20,6 +20,12 @@
       </header>
 
       <form id="options-form" novalidate>
+        <section class="settings-section" aria-labelledby="interface-heading">
+          <h2 id="interface-heading" data-i18n="interfaceSection">Interface</h2>
+          <label for="ui-language" data-i18n="uiLanguageLabel">Interface language</label>
+          <select id="ui-language" name="uiLanguage"></select>
+        </section>
+
         <section class="settings-section" aria-labelledby="connection-heading">
           <h2 id="connection-heading" data-i18n="connectionSection">Connection</h2>
           <div id="backend-field">
@@ -81,6 +87,12 @@
               </select>
             </div>
           </div>
+          <label class="checkbox-row" for="preserve-voice-pitch">
+            <input id="preserve-voice-pitch" name="preserveVoicePitch" type="checkbox" />
+            <span data-i18n="preserveVoicePitchLabel">
+              Keep voice pitch when YouTube speed changes
+            </span>
+          </label>
         </section>
 
         <section class="settings-section" aria-labelledby="automation-heading">
